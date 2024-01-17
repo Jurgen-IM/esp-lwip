@@ -339,6 +339,7 @@ err_t   netconn_recv_udp_raw_netbuf(struct netconn *conn, struct netbuf **new_bu
 err_t   netconn_recv_udp_raw_netbuf_flags(struct netconn *conn, struct netbuf **new_buf, u8_t apiflags);
 err_t   netconn_recv_tcp_pbuf(struct netconn *conn, struct pbuf **new_buf);
 err_t   netconn_recv_tcp_pbuf_flags(struct netconn *conn, struct pbuf **new_buf, u8_t apiflags);
+err_t	netconn_get_errors(struct netconn *conn);
 err_t   netconn_tcp_recvd(struct netconn *conn, size_t len);
 err_t   netconn_sendto(struct netconn *conn, struct netbuf *buf,
                              const ip_addr_t *addr, u16_t port);
@@ -362,10 +363,18 @@ err_t   netconn_join_leave_group_netif(struct netconn *conn, const ip_addr_t *mu
 #if LWIP_DNS
 #if LWIP_IPV4 && LWIP_IPV6
 err_t   netconn_gethostbyname_addrtype(const char *name, ip_addr_t *addr, u8_t dns_addrtype);
+err_t   netconn_gethostbyname_addrtype_start(const char *name, u8_t dns_addrtype, void **ctx);
+err_t   netconn_gethostbyname_addrtype_check(ip_addr_t *addr, void *ctx);
 #define netconn_gethostbyname(name, addr) netconn_gethostbyname_addrtype(name, addr, NETCONN_DNS_DEFAULT)
+#define netconn_gethostbyname_start(name, ctx) netconn_gethostbyname_addrtype_start(name, NETCONN_DNS_DEFAULT, ctx)
+#define netconn_gethostbyname_check(addr, ctx) netconn_gethostbyname_addrtype_check(addr, ctx)
 #else /* LWIP_IPV4 && LWIP_IPV6 */
 err_t   netconn_gethostbyname(const char *name, ip_addr_t *addr);
+err_t   netconn_gethostbyname_start(const char *name, void **ctx);
+err_t   netconn_gethostbyname_check(ip_addr_t *addr, void *ctx);
 #define netconn_gethostbyname_addrtype(name, addr, dns_addrtype) netconn_gethostbyname(name, addr)
+#define netconn_gethostbyname_addrtype_start(name, dns_addrtype, ctx) netconn_gethostbyname_start(name, ctx)
+#define netconn_gethostbyname_addrtype_check(addr, ctx) netconn_gethostbyname_check(addr, ctx)
 #endif /* LWIP_IPV4 && LWIP_IPV6 */
 #endif /* LWIP_DNS */
 

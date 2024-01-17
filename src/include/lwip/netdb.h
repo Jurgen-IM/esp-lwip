@@ -75,6 +75,8 @@ extern "C" {
 #define NO_DATA         211
 #define NO_RECOVERY     212
 #define TRY_AGAIN       213
+#define IN_PROGRESS	214
+#define HOST_FOUND  	215
 #endif /* LWIP_DNS_API_DEFINE_ERRORS */
 
 #if LWIP_DNS_API_DEFINE_FLAGS
@@ -171,6 +173,10 @@ static inline int getaddrinfo(const char *nodename, const char *servname, const 
 
 #endif /* ESP_SOCKET */
 #endif /* LWIP_COMPAT_SOCKETS */
+
+
+int lwip_dns_resolve_start(const char *name, u8_t dns_addrtype, void **ctx);
+int lwip_dns_resolve_check(ip_addr_t *addr, void *ctx);
 
 #ifdef __cplusplus
 }

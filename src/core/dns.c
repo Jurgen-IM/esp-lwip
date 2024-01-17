@@ -118,9 +118,9 @@ static u16_t dns_txid;
 #define DNS_PORT_ALLOWED(port) ((port) >= 1024)
 #endif
 
-/** DNS resource record max. TTL (one week as default) */
+/** DNS resource record max. TTL (one day as default) */
 #ifndef DNS_MAX_TTL
-#define DNS_MAX_TTL               604800
+#define DNS_MAX_TTL               86400*DNS_TMR_SECOND
 #elif DNS_MAX_TTL > 0x7FFFFFFF
 #error DNS_MAX_TTL must be a positive 32-bit value
 #endif
@@ -138,7 +138,7 @@ static u16_t dns_txid;
  */
 #if ((LWIP_DNS_SECURE & LWIP_DNS_SECURE_NO_MULTIPLE_OUTSTANDING) != 0)
 #ifndef DNS_MAX_REQUESTS
-#define DNS_MAX_REQUESTS          DNS_TABLE_SIZE
+#define DNS_MAX_REQUESTS          4//(DNS_TABLE_SIZE)
 #else
 #if DNS_MAX_REQUESTS > 255
 #error DNS_MAX_REQUESTS must fit into an u8_t
@@ -147,7 +147,7 @@ static u16_t dns_txid;
 #else
 /* In this configuration, both arrays have to have the same size and are used
  * like one entry (used/free) */
-#define DNS_MAX_REQUESTS          DNS_TABLE_SIZE
+#define DNS_MAX_REQUESTS          4//(DNS_TABLE_SIZE)
 #endif
 
 /* The number of UDP source ports used in parallel */
@@ -242,6 +242,7 @@ struct dns_table_entry {
 #if LWIP_DNS_SUPPORT_MDNS_QUERIES
   u8_t is_mdns;
 #endif
+  s8_t reqnum;
 };
 
 /** DNS request table entry: used when dns_gehostbyname cannot answer the
@@ -304,7 +305,14 @@ static u8_t                   dns_last_pcb_idx;
 static u8_t                   dns_seqno;
 static struct dns_table_entry dns_table[DNS_TABLE_SIZE];
 static struct dns_req_entry   dns_requests[DNS_MAX_REQUESTS];
-static ip_addr_t              dns_servers[DNS_MAX_SERVERS];
+
+struct dns_server_info{
+	struct dns_server_info	*next;
+	ip_addr_t           	dns_server[DNS_MAX_SERVERS_PER_NETIF];
+	struct netif			*netif;
+};
+
+static struct dns_server_info	*dns_servers_list = NULL;
 
 #if LWIP_IPV4
 const ip_addr_t dns_mquery_v4group = DNS_MQUERY_IPV4_GROUP_INIT;
@@ -320,27 +328,7 @@ const ip_addr_t dns_mquery_v6group = DNS_MQUERY_IPV6_GROUP_INIT;
 void
 dns_init(void)
 {
-#if ESP_DNS
-#ifdef FALLBACK_DNS_SERVER_ADDRESS
-  /* initialize fallback dns DNS server address */
-  ip_addr_t dnsserver;
-  FALLBACK_DNS_SERVER_ADDRESS(&dnsserver);
-#if LWIP_IPV4 && LWIP_IPV6
-  dnsserver.type = IPADDR_TYPE_V4;
-#endif
-  dns_setserver(DNS_FALLBACK_SERVER_INDEX, &dnsserver);
-#endif /* FALLBACK_DNS_SERVER_ADDRESS */
-
-#else
-
-
-#ifdef DNS_SERVER_ADDRESS
-  /* initialize default DNS server address */
-  ip_addr_t dnsserver;
-  DNS_SERVER_ADDRESS(&dnsserver);
-  dns_setserver(0, &dnsserver);
-#endif /* DNS_SERVER_ADDRESS */
-#endif
+  dns_clear_cache();
 
   LWIP_ASSERT("sanity check SIZEOF_DNS_QUERY",
               sizeof(struct dns_query) == SIZEOF_DNS_QUERY);
@@ -379,38 +367,64 @@ dns_init(void)
  * @param dnsserver IP address of the DNS server to set
  */
 void
-dns_setserver(u8_t numdns, const ip_addr_t *dnsserver)
+dns_setserver(u8_t numdns, struct netif *netif, const ip_addr_t *dnsserver)
 {
-  if (numdns < DNS_MAX_SERVERS) {
-    if (dnsserver != NULL) {
-      dns_servers[numdns] = (*dnsserver);
-    } else {
-      dns_servers[numdns] = *IP_ADDR_ANY;
-    }
+	if(numdns>=DNS_MAX_SERVERS_PER_NETIF) // dns
+	{
+
+		struct dns_server_info	*dnss;
+		if(dns_servers_list && dns_servers_list->netif == netif)
+		{
+			dnss = dns_servers_list->next;
+			mem_free(dns_servers_list);
+			dns_servers_list = dnss;
+		}
+		else
+		{
+			for(dnss = dns_servers_list; dnss != NULL; dnss = dnss->next)
+			{
+				if(dnss->next && (dnss->next->netif == netif))
+				{
+					struct dns_server_info	*dnst = dnss->next->next;
+					free(dnss->next);
+					dnss->next = dnst;
+					break;
+				}
   }
 }
-
-#if ESP_DNS
-void 
-dns_clear_servers(bool keep_fallback)
-{
-  u8_t numdns = 0; 
-  
-  for (numdns = 0; numdns < DNS_MAX_SERVERS; numdns ++) {
-    if (keep_fallback && numdns == DNS_FALLBACK_SERVER_INDEX) {
-      continue;
-    }
-
-    dns_setserver(numdns, NULL);
-  }
+	}
+	else if(netif)// dns
+	{
+		struct dns_server_info	*dnss=NULL;
+		for(dnss = dns_servers_list; dnss != NULL; dnss = dnss->next)
+		{
+			if(dnss->netif == netif)
+				break;
+		}
+		if(dnss==NULL){
+			dnss = (struct dns_server_info	*)mem_calloc(1, sizeof(struct dns_server_info));
+			if(dnss == NULL)
+				return;
+			dnss->netif = netif;
+			dnss->next = dns_servers_list;
+			dns_servers_list = dnss;
+		}
+		if (dnsserver != NULL)
+			dnss->dns_server[numdns] = (*dnsserver);
+		else
+			dnss->dns_server[numdns] = *IP_ADDR_ANY;
+	}
 }
 
+
+/**
+ * Clears the DNS cache
+ */
 void
 dns_clear_cache(void)
 {
   memset(dns_table, 0, sizeof(struct dns_table_entry) * DNS_TABLE_SIZE);
 }
-#endif
 
 /**
  * @ingroup dns
@@ -421,14 +435,40 @@ dns_clear_cache(void)
  *         server has not been configured.
  */
 const ip_addr_t *
-dns_getserver(u8_t numdns)
+dns_getserver(u8_t numdns, struct netif *netif)
 {
-  if (numdns < DNS_MAX_SERVERS) {
-    return &dns_servers[numdns];
-  } else {
+	if (numdns < DNS_MAX_SERVERS_PER_NETIF)
+	{
+		struct dns_server_info	*dnss;
+		for(dnss = dns_servers_list; dnss != NULL; dnss = dnss->next)
+		{
+			if(dnss->netif == netif)
+				break;
+		}
+		if(dnss==NULL)
+    return IP_ADDR_ANY;
+		return &dnss->dns_server[numdns];
+	}else {
     return IP_ADDR_ANY;
   }
 }
+
+#if ESP_DNS
+static bool dns_server_is_set (void)
+{
+	struct dns_server_info	*dnss=NULL;
+	for(dnss = dns_servers_list; dnss != NULL; dnss = dnss->next)
+	{
+		for(int i=0;i<DNS_MAX_SERVERS_PER_NETIF;i++)
+		{
+			if (!ip_addr_isany_val(dnss->dns_server[i])) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+#endif
 
 #if ESP_LWIP_DNS_TIMERS_ONDEMAND
 /**
@@ -810,6 +850,30 @@ dns_skip_name(struct pbuf *p, u16_t query_idx)
 }
 
 /**
+ * Check whether there are current index DNS servers available to try
+ */
+
+static u8_t
+dns_servers_available(struct dns_table_entry *pentry)
+{
+	u8_t ret = 0;
+
+	if((pentry->server_idx) >= DNS_MAX_SERVERS_PER_NETIF)
+		return ret;
+	struct dns_server_info	*dnss=NULL;
+	for(dnss = dns_servers_list; dnss != NULL; dnss = dnss->next)
+	{
+		if(!ip_addr_isany_val(dnss->dns_server[pentry->server_idx]))
+		{
+			ret = 1;
+			break;
+		}
+	}
+	return ret;
+}
+
+
+/**
  * Send a DNS query packet.
  *
  * @param idx the DNS table entry index for which to send a request
@@ -818,7 +882,7 @@ dns_skip_name(struct pbuf *p, u16_t query_idx)
 static err_t
 dns_send(u8_t idx)
 {
-  err_t err;
+  err_t err = ERR_VAL;
   struct dns_hdr hdr;
   struct dns_query qry;
   struct pbuf *p;
@@ -831,7 +895,17 @@ dns_send(u8_t idx)
   LWIP_DEBUGF(DNS_DEBUG, ("dns_send: dns_servers[%"U16_F"] \"%s\": request\n",
                           (u16_t)(entry->server_idx), entry->name));
   LWIP_ASSERT("dns server out of array", entry->server_idx < DNS_MAX_SERVERS);
-  if (ip_addr_isany_val(dns_servers[entry->server_idx])
+
+
+
+  for (int i=entry->server_idx;i<DNS_MAX_SERVERS_PER_NETIF;i++){
+	  if(!dns_servers_available(entry))
+		  entry->server_idx++;
+	  else
+		  break;
+  }
+
+  if ((entry->server_idx>=DNS_MAX_SERVERS_PER_NETIF)
 #if LWIP_DNS_SUPPORT_MDNS_QUERIES
       && !entry->is_mdns
 #endif
@@ -843,16 +917,29 @@ dns_send(u8_t idx)
     entry->state = DNS_STATE_UNUSED;
     return ERR_OK;
   }
-
+  struct dns_server_info *dnss = dns_servers_list;
+  while((dnss != NULL)
+#if LWIP_DNS_SUPPORT_MDNS_QUERIES
+	  || entry->is_mdns
+#endif
+  ){
+#if LWIP_DNS_SUPPORT_MDNS_QUERIES
+    if(!entry->is_mdns)
+#endif
+	{
+		if(dnss && (ip_addr_isany_val(dnss->dns_server[entry->server_idx]) || !netif_added(dnss->netif) || !netif_is_up(dnss->netif) || !netif_is_link_up(dnss->netif) || netif_ip4_addr(dnss->netif)->addr == PP_HTONL(IPADDR_LOOPBACK)))
+		{
+		  dnss = dnss->next;
+		  continue;
+		}
+    }
   /* if here, we have either a new query or a retry on a previous query to process */
   p = pbuf_alloc(PBUF_TRANSPORT, (u16_t)(SIZEOF_DNS_HDR + strlen(entry->name) + 2 +
                                          SIZEOF_DNS_QUERY), PBUF_RAM);
   if (p != NULL) {
-    const ip_addr_t *dst;
-    u16_t dst_port;
     /* fill dns header */
     memset(&hdr, 0, SIZEOF_DNS_HDR);
-    hdr.id = lwip_htons(entry->txid);
+		hdr.id = lwip_htons(entry->txid+netif_get_index(dnss->netif));
     hdr.flags1 = DNS_FLAG1_RD;
     hdr.numquestions = PP_HTONS(1);
     pbuf_take(p, &hdr, SIZEOF_DNS_HDR);
@@ -898,6 +985,8 @@ dns_send(u8_t idx)
                             entry->txid, entry->name, entry->server_idx));
 #if LWIP_DNS_SUPPORT_MDNS_QUERIES
     if (entry->is_mdns) {
+		  const ip_addr_t *dst;
+		  u16_t dst_port;
       dst_port = DNS_MQUERY_PORT;
 #if LWIP_IPV6
       if (LWIP_DNS_ADDRTYPE_IS_IPV6(entry->reqaddrtype)) {
@@ -912,20 +1001,26 @@ dns_send(u8_t idx)
         dst = &dns_mquery_v4group;
       }
 #endif
+		  err = udp_sendto(dns_pcbs[pcb_idx], p, dst, dst_port);
+			/* free pbuf */
+		  pbuf_free(p);
+		  return err;
     } else
 #endif /* LWIP_DNS_SUPPORT_MDNS_QUERIES */
     {
-      dst_port = DNS_SERVER_PORT;
-      dst = &dns_servers[entry->server_idx];
-    }
-    err = udp_sendto(dns_pcbs[pcb_idx], p, dst, dst_port);
-
+		  err = udp_sendto_if(dns_pcbs[pcb_idx], p, &dnss->dns_server[entry->server_idx], DNS_SERVER_PORT, dnss->netif);
+		  if(err==ERR_OK)
+			entry->reqnum++;
+		}
     /* free pbuf */
     pbuf_free(p);
   } else {
     err = ERR_MEM;
   }
-
+	  if(err!=ERR_OK)
+		  break;
+	  dnss = dnss->next;
+  }
   return err;
 overflow_return:
   pbuf_free(p);
@@ -1031,8 +1126,10 @@ dns_call_found(u8_t idx, ip_addr_t *addr)
 
 #if ((LWIP_DNS_SECURE & LWIP_DNS_SECURE_NO_MULTIPLE_OUTSTANDING) != 0)
   for (i = 0; i < DNS_MAX_REQUESTS; i++) {
-    if (dns_requests[i].found && (dns_requests[i].dns_table_idx == idx)) {
+    if (dns_requests[i].dns_table_idx == idx) {
+    	if(dns_requests[i].found){
       (*dns_requests[i].found)(dns_table[idx].name, addr, dns_requests[i].arg);
+    	}
       /* flush this entry */
       dns_requests[i].found = NULL;
     }
@@ -1045,7 +1142,7 @@ dns_call_found(u8_t idx, ip_addr_t *addr)
 #endif
 #if ((LWIP_DNS_SECURE & LWIP_DNS_SECURE_RAND_SRC_PORT) != 0)
   /* close the pcb used unless other request are using it */
-  for (i = 0; i < DNS_MAX_REQUESTS; i++) {
+  for (i = 0; i < DNS_TABLE_SIZE; i++) {
     if (i == idx) {
       continue; /* only check other requests */
     }
@@ -1074,35 +1171,19 @@ dns_create_txid(void)
   u8_t i;
 
 again:
-  txid = (u16_t)DNS_RAND_TXID();
-
+  txid = (u16_t)DNS_RAND_TXID()<<5;
+  if(txid==0)
+      goto again;
   /* check whether the ID is unique */
   for (i = 0; i < DNS_TABLE_SIZE; i++) {
     if ((dns_table[i].state == DNS_STATE_ASKING) &&
-        (dns_table[i].txid == txid)) {
+        ((dns_table[i].txid&0xffe0) == (txid&0xffe0))) {
       /* ID already used by another pending query */
       goto again;
     }
   }
 
   return txid;
-}
-
-/**
- * Check whether there are other backup DNS servers available to try
- */
-static u8_t
-dns_backupserver_available(struct dns_table_entry *pentry)
-{
-  u8_t ret = 0;
-
-  if (pentry) {
-    if ((pentry->server_idx + 1 < DNS_MAX_SERVERS) && !ip_addr_isany_val(dns_servers[pentry->server_idx + 1])) {
-      ret = 1;
-    }
-  }
-
-  return ret;
 }
 
 /**
@@ -1128,37 +1209,28 @@ dns_check_entry(u8_t i)
       entry->txid = dns_create_txid();
       entry->state = DNS_STATE_ASKING;
       entry->server_idx = 0;
-      entry->tmr = 1;
+      entry->tmr = 3;
       entry->retries = 0;
-#if ESP_DNS
-      while((entry->server_idx + 1 < DNS_MAX_SERVERS) && ip_addr_isany_val(dns_servers[entry->server_idx])) {
-        entry->server_idx ++;
-      }
-#endif
+      entry->reqnum = 0;
       /* send DNS packet for this entry */
       err = dns_send(i);
       if (err != ERR_OK) {
         LWIP_DEBUGF(DNS_DEBUG | LWIP_DBG_LEVEL_WARNING,
                     ("dns_send returned error: %s\n", lwip_strerr(err)));
+        entry->retries = DNS_MAX_RETRIES-1;
       }
       break;
     case DNS_STATE_ASKING:
       if (--entry->tmr == 0) {
         if (++entry->retries == DNS_MAX_RETRIES) {
-#if ESP_DNS
-          /* skip DNS servers with zero address */
-        while ((entry->server_idx + 1 < DNS_MAX_SERVERS) && ip_addr_isany_val(dns_servers[entry->server_idx + 1])) {
-            entry->server_idx++;
-          }
-#endif
-          if (dns_backupserver_available(entry)
+          entry->server_idx++;
+          if (dns_servers_available(entry)
 #if LWIP_DNS_SUPPORT_MDNS_QUERIES
               && !entry->is_mdns
 #endif /* LWIP_DNS_SUPPORT_MDNS_QUERIES */
              ) {
             /* change of server */
-            entry->server_idx++;
-            entry->tmr = 1;
+            entry->tmr = 3;
             entry->retries = 0;
           } else {
             LWIP_DEBUGF(DNS_DEBUG, ("dns_check_entry: \"%s\": timeout\n", entry->name));
@@ -1170,7 +1242,7 @@ dns_check_entry(u8_t i)
           }
         } else {
           /* wait longer for the next retry */
-          entry->tmr = entry->retries;
+          entry->tmr = entry->retries*3;
         }
 
         /* send DNS packet for this entry */
@@ -1178,6 +1250,7 @@ dns_check_entry(u8_t i)
         if (err != ERR_OK) {
           LWIP_DEBUGF(DNS_DEBUG | LWIP_DBG_LEVEL_WARNING,
                       ("dns_send returned error: %s\n", lwip_strerr(err)));
+          entry->retries = DNS_MAX_RETRIES-1;
         }
       }
       break;
@@ -1226,10 +1299,11 @@ dns_correct_response(u8_t idx, u32_t ttl)
   LWIP_DEBUGF(DNS_DEBUG, ("\n"));
 
   /* read the answer resource record's TTL, and maximize it if needed */
-  entry->ttl = ttl;
+  entry->ttl = ttl*DNS_TMR_SECOND;
   if (entry->ttl > DNS_MAX_TTL) {
     entry->ttl = DNS_MAX_TTL;
   }
+
   dns_call_found(idx, &entry->ipaddr);
 
   if (entry->ttl == 0) {
@@ -1276,7 +1350,7 @@ dns_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, 
     for (i = 0; i < DNS_TABLE_SIZE; i++) {
       struct dns_table_entry *entry = &dns_table[i];
       if ((entry->state == DNS_STATE_ASKING) &&
-          (entry->txid == txid)) {
+          ((entry->txid&0xffe0) == (txid&0xffe0))) {
 
         /* We only care about the question(s) and the answers. The authrr
            and the extrarr are simply discarded. */
@@ -1297,9 +1371,21 @@ dns_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, 
         if (!entry->is_mdns)
 #endif /* LWIP_DNS_SUPPORT_MDNS_QUERIES */
         {
+
           /* Check whether response comes from the same network address to which the
              question was sent. (RFC 5452) */
-          if (!ip_addr_cmp(addr, &dns_servers[entry->server_idx])) {
+        	bool found = false;
+        	u8_t indx=txid&0x1f;
+        	struct dns_server_info	*dnss=NULL;
+        	for(dnss = dns_servers_list; dnss != NULL; dnss = dnss->next)
+        	{
+        		if((netif_get_by_index(indx) == dnss->netif) && ip_addr_cmp(addr, &dnss->dns_server[entry->server_idx]))
+        		{
+        			found = true;
+        			break;
+        		}
+        	}
+            if (!found) {
             goto ignore_packet; /* ignore this packet */
           }
         }
@@ -1329,23 +1415,8 @@ dns_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, 
         res_idx = (u16_t)(res_idx + SIZEOF_DNS_QUERY);
 
         /* Check for error. If so, call callback to inform. */
-        if (hdr.flags2 & DNS_FLAG2_ERR_MASK) {
+        if ((hdr.flags2 & DNS_FLAG2_ERR_MASK)==0) {
           LWIP_DEBUGF(DNS_DEBUG, ("dns_recv: \"%s\": error in flags\n", entry->name));
-
-          /* if there is another backup DNS server to try
-           * then don't stop the DNS request
-           */
-          if (dns_backupserver_available(entry)) {
-            /* avoid retrying the same server */
-            entry->retries = DNS_MAX_RETRIES-1;
-            entry->tmr     = 1;
-
-            /* contact next available server for this entry */
-            dns_check_entry(i);
-
-            goto ignore_packet;
-          }
-        } else {
           while ((nanswers > 0) && (res_idx < p->tot_len)) {
             /* skip answer resource record's host name */
             res_idx = dns_skip_name(p, res_idx);
@@ -1377,6 +1448,7 @@ dns_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, 
                   ip_addr_copy_from_ip4(dns_table[i].ipaddr, ip4addr);
                   pbuf_free(p);
                   /* handle correct response */
+                  entry->txid = 0;
                   dns_correct_response(i, lwip_ntohl(ans.ttl));
                   return;
                 }
@@ -1428,6 +1500,22 @@ dns_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, 
 #endif /* LWIP_IPV4 && LWIP_IPV6 */
           LWIP_DEBUGF(DNS_DEBUG, ("dns_recv: \"%s\": error in response\n", entry->name));
         }
+
+        if(--entry->reqnum <= 0){
+         /* if there is another backup DNS server to try
+         * then don't stop the DNS request
+         */
+        	u8_t indx = entry->server_idx;
+        	entry->server_idx++;
+			if (dns_servers_available(entry)) {
+			  /* avoid retrying the same server */
+			  entry->retries = DNS_MAX_RETRIES-1;
+			  entry->tmr     = 1;
+			  entry->server_idx = indx;
+			  /* contact next available server for this entry */
+			  dns_check_entry(i);
+			  goto ignore_packet;
+			}
         /* call callback to indicate error, clean up memory and return */
         pbuf_free(p);
         dns_call_found(i, NULL);
@@ -1435,6 +1523,7 @@ dns_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, 
         return;
       }
     }
+  }
   }
 
 ignore_packet:
@@ -1616,19 +1705,6 @@ dns_gethostbyname(const char *hostname, ip_addr_t *addr, dns_found_callback foun
   return dns_gethostbyname_addrtype(hostname, addr, found, callback_arg, LWIP_DNS_ADDRTYPE_DEFAULT);
 }
 
-#if ESP_DNS
-static bool dns_server_is_set (void)
-{
-  int i = 0;
-  for (i = 0;i < DNS_MAX_SERVERS; i++) {
-    if (!ip_addr_isany_val(dns_servers[i])) {
-      return true;
-    }
-  }
-  return false;
-}
-#endif
-
 /**
  * @ingroup dns
  * Like dns_gethostbyname, but returned address type can be controlled:
@@ -1653,8 +1729,7 @@ dns_gethostbyname_addrtype(const char *hostname, ip_addr_t *addr, dns_found_call
 #endif
   /* not initialized or no valid server yet, or invalid addr pointer
    * or invalid hostname or invalid hostname length */
-  if ((addr == NULL) ||
-      (!hostname) || (!hostname[0])) {
+  if ((addr == NULL) || (!hostname) || (!hostname[0])) {
     return ERR_ARG;
   }
 #if ((LWIP_DNS_SECURE & LWIP_DNS_SECURE_RAND_SRC_PORT) == 0)

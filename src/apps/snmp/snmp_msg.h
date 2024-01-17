@@ -57,11 +57,6 @@
 extern "C" {
 #endif
 
-/* version defines used in PDU */
-#define SNMP_VERSION_1  0
-#define SNMP_VERSION_2c 1
-#define SNMP_VERSION_3  3
-
 struct snmp_varbind_enumerator {
   struct snmp_pbuf_stream pbuf_stream;
   u16_t varbind_count;
@@ -117,7 +112,7 @@ struct snmp_request {
   s32_t msg_authoritative_engine_time;
   u8_t  msg_user_name[SNMP_V3_MAX_USER_LENGTH];
   u8_t  msg_user_name_len;
-  u8_t  msg_authentication_parameters[SNMP_V3_MAX_AUTH_PARAM_LENGTH];
+  u8_t  msg_authentication_parameters[LWIP_MAX(SNMP_V3_MAX_AUTH_PARAM_LENGTH,SNMP_V3_LOCALIZED_PASSWORD_KEY_LEN)];
   u8_t  msg_authentication_parameters_len;
   u8_t  msg_privacy_parameters[SNMP_V3_MAX_PRIV_PARAM_LENGTH];
   u8_t  msg_privacy_parameters_len;
@@ -164,14 +159,15 @@ struct snmp_varbind_len {
 };
 
 /** Agent community string */
-extern const char *snmp_community;
+extern char snmp_community[];
 /** Agent community string for write access */
-extern const char *snmp_community_write;
+extern char snmp_community_write[];
 /** handle for sending traps */
 extern void *snmp_traps_handle;
 
 void snmp_receive(void *handle, struct pbuf *p, const ip_addr_t *source_ip, u16_t port);
 err_t snmp_sendto(void *handle, struct pbuf *p, const ip_addr_t *dst, u16_t port);
+err_t snmp_sendto_if(void *handle, struct pbuf *p, const ip_addr_t *dst, u16_t port, void* netif);																			  
 u8_t snmp_get_local_ip_for_dst(void *handle, const ip_addr_t *dst, ip_addr_t *result);
 err_t snmp_varbind_length(struct snmp_varbind *varbind, struct snmp_varbind_len *len);
 err_t snmp_append_outbound_varbind(struct snmp_pbuf_stream *pbuf_stream, struct snmp_varbind *varbind);

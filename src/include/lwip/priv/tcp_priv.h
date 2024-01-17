@@ -76,7 +76,7 @@ void             tcp_txnow   (void);
 /* Only used by IP to pass a TCP segment to TCP: */
 void             tcp_input   (struct pbuf *p, struct netif *inp);
 /* Used within the TCP code only: */
-struct tcp_pcb * tcp_alloc   (u8_t prio);
+struct tcp_pcb * tcp_alloc   (u8_t prio, struct tcp_pcb_listen * tpcb);
 void             tcp_free    (struct tcp_pcb *pcb);
 void             tcp_abandon (struct tcp_pcb *pcb, int reset);
 err_t            tcp_send_empty_ack(struct tcp_pcb *pcb);
@@ -101,7 +101,7 @@ err_t            tcp_process_refused_data(struct tcp_pcb *pcb);
                             ((tpcb)->flags & (TF_NODELAY | TF_INFR)) || \
                             (((tpcb)->unsent != NULL) && (((tpcb)->unsent->next != NULL) || \
                               ((tpcb)->unsent->len >= (tpcb)->mss))) || \
-                            ((tcp_sndbuf(tpcb) == 0) || (tcp_sndqueuelen(tpcb) >= TCP_SND_QUEUELEN)) \
+                            ((tcp_sndbuf(tpcb) == 0) || (tcp_sndqueuelen(tpcb) >= TCP_SND_QUEUELEN(tpcb))) \
                             ) ? 1 : 0)
 #define tcp_output_nagle(tpcb) (tcp_do_output_nagle(tpcb) ? tcp_output(tpcb) : ERR_OK)
 

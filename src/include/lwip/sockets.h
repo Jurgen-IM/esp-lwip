@@ -179,9 +179,8 @@ will need to increase long long */
                            length)
 
 /* Set socket options argument */
-#define IFNAMSIZ NETIF_NAMESIZE
 struct ifreq {
-  char ifr_name[IFNAMSIZ]; /* Interface name */
+  char ifr_name[NETIF_NAMESIZE]; /* Interface name */
 };
 
 /* Socket protocol types (TCP/UDP/RAW) */
@@ -219,7 +218,8 @@ struct ifreq {
 #define SO_CONTIMEO     0x1009 /* Unimplemented: connect timeout */
 #define SO_NO_CHECK     0x100a /* don't create UDP checksum */
 #define SO_BINDTODEVICE 0x100b /* bind to device */
-
+#define SO_MSSBUF		0x100c
+#define SO_LOCALIP		0x100d	  
 /*
  * Structure used for manipulating linger option.
  */

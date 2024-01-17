@@ -44,18 +44,34 @@ extern "C" {
 
 #if LWIP_SNMP && LWIP_SNMP_V3
 
+#define SNMP_V3_AUTH_FLAG      0x01
+#define SNMP_V3_PRIV_FLAG      0x02
+
+/* Security levels */
+#define SNMP_V3_NOAUTHNOPRIV   0x00
+#define SNMP_V3_AUTHNOPRIV     SNMP_V3_AUTH_FLAG
+#define SNMP_V3_AUTHPRIV       (SNMP_V3_AUTH_FLAG | SNMP_V3_PRIV_FLAG)
+
+#define SNMP_MAX_TIME_BOOT 2147483647UL
+
 typedef enum
 {
-  SNMP_V3_AUTH_ALGO_INVAL = 0,
-  SNMP_V3_AUTH_ALGO_MD5   = 1,
-  SNMP_V3_AUTH_ALGO_SHA   = 2
+  SNMP_V3_AUTH_ALGO_INVAL 		= 0,
+  SNMP_V3_AUTH_ALGO_MD5   		= 1,
+  SNMP_V3_AUTH_ALGO_SHA   		= 2,
+  SNMP_V3_AUTH_ALGO_SHA256   	= 3,
+  SNMP_V3_AUTH_ALGO_SHA512   	= 4,
+  SNMP_V3_AUTH_END
 } snmpv3_auth_algo_t;
 
 typedef enum
 {
-  SNMP_V3_PRIV_ALGO_INVAL = 0,
-  SNMP_V3_PRIV_ALGO_DES   = 1,
-  SNMP_V3_PRIV_ALGO_AES   = 2
+  SNMP_V3_PRIV_ALGO_INVAL 		= 0,
+  SNMP_V3_PRIV_ALGO_DES   		= 1,
+  SNMP_V3_PRIV_ALGO_AES   		= 2,
+  SNMP_V3_PRIV_ALGO_AES192 		= 3,
+  SNMP_V3_PRIV_ALGO_AES256 		= 4,
+  SNMP_V3_PRIV_END
 } snmpv3_priv_algo_t;
 
 typedef enum
@@ -66,6 +82,20 @@ typedef enum
   SNMP_V3_USER_STORAGETYPE_PERMANENT   = 4,
   SNMP_V3_USER_STORAGETYPE_READONLY    = 5
 } snmpv3_user_storagetype_t;
+
+typedef enum
+{
+	/* Security Model Reserved for ANY */
+    ANY_SECUTIRY_MODEL=0x00,
+	/* Security Model reserved fro SNMP version 1 */
+    SNMPV1_SECURITY_MODEL=0X01,
+	/* Community Security Model reserved for SNMP version 2 */
+    SNMPV2C_SECURITY_MODEL=0X02,
+	/* User based security model reserved for SNMP version 3 */
+    SNMPV3_USM_SECURITY_MODEL=0X03
+    /* Values between 1 to 255, inclusive, are reserved for standards-track
+         Security Models  and are managed by IANA.*/
+}snmpv3_security_model_t;
 
 /*
  * The following callback functions must be implemented by the application.
@@ -81,7 +111,7 @@ void snmpv3_set_engine_boots(u32_t boots);
 u32_t snmpv3_get_engine_time(void);
 void snmpv3_reset_engine_time(void);
 
-err_t snmpv3_get_user(const char* username, snmpv3_auth_algo_t *auth_algo, u8_t *auth_key, snmpv3_priv_algo_t *priv_algo, u8_t *priv_key);
+err_t snmpv3_get_user(const char* username, snmpv3_auth_algo_t *auth_algo, u8_t **auth_key, snmpv3_priv_algo_t *priv_algo, u8_t **priv_key);
 u8_t snmpv3_get_amount_of_users(void);
 err_t snmpv3_get_user_storagetype(const char *username, snmpv3_user_storagetype_t *storagetype);
 err_t snmpv3_get_username(char *username, u8_t index);
@@ -103,7 +133,22 @@ void snmpv3_password_to_key_sha(
     size_t      passwordlen,  /* IN */
     const u8_t *engineID,     /* IN  - pointer to snmpEngineID  */
     u8_t        engineLength, /* IN  - length of snmpEngineID */
-    u8_t       *key);         /* OUT - pointer to caller 20-octet buffer */
+    u8_t       *key);         /* OUT - pointer to caller 64-octet buffer */
+
+void snmpv3_password_to_key_sha256(
+    const u8_t *password,     /* IN */
+    size_t      passwordlen,  /* IN */
+    const u8_t *engineID,     /* IN  - pointer to snmpEngineID  */
+    u8_t        engineLength, /* IN  - length of snmpEngineID */
+    u8_t       *key);         /* OUT - pointer to caller 64-octet buffer */
+
+void snmpv3_password_to_key_sha512(
+    const u8_t *password,     /* IN */
+    size_t      passwordlen,  /* IN */
+    const u8_t *engineID,     /* IN  - pointer to snmpEngineID  */
+    u8_t        engineLength, /* IN  - length of snmpEngineID */
+    u8_t       *key);         /* OUT - pointer to caller 64-octet buffer */
+
 
 #endif
 

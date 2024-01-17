@@ -279,6 +279,51 @@ ip4_route(const ip4_addr_t *dest)
   return netif_default;
 }
 
+struct netif *
+ip4_route_src_no_default(const ip4_addr_t *src, const ip4_addr_t *dest)
+{
+	if (src != NULL) {
+		/* when src==NULL, the hook is called from ip4_route(dest) */
+		struct netif *netif = LWIP_HOOK_IP4_ROUTE_SRC(src, dest);
+		if (netif != NULL) {
+			return netif;
+		}
+	}
+#if !LWIP_SINGLE_NETIF
+  struct netif *netif;
+
+  LWIP_ASSERT_CORE_LOCKED();
+
+#if LWIP_MULTICAST_TX_OPTIONS
+  /* Use administratively selected interface for multicast by default */
+  if (ip4_addr_ismulticast(dest) && ip4_default_multicast_netif) {
+    return ip4_default_multicast_netif;
+  }
+#endif /* LWIP_MULTICAST_TX_OPTIONS */
+
+  /* bug #54569: in case LWIP_SINGLE_NETIF=1 and LWIP_DEBUGF() disabled, the following loop is optimized away */
+  LWIP_UNUSED_ARG(dest);
+
+	/* iterate through netifs */
+	NETIF_FOREACH(netif) {
+		/* is the netif up, does it have a link and a valid address? */
+		if (netif_is_up(netif) && netif_is_link_up(netif) && !ip4_addr_isany_val(*netif_ip4_addr(netif))) {
+
+			/* network mask matches? */
+			if (ip4_addr_netcmp(dest, netif_ip4_addr(netif), netif_ip4_netmask(netif))) {
+				/* return netif on which to forward IP packet */
+				return netif;
+			}
+			/* gateway matches on a non broadcast interface? (i.e. peer in a point to point interface) */
+			if (((netif->flags & NETIF_FLAG_BROADCAST) == 0) && ip4_addr_cmp(dest, netif_ip4_gw(netif))) {
+				/* return netif on which to forward IP packet */
+				return netif;
+			}
+		}
+	}
+#endif /* !LWIP_SINGLE_NETIF */
+	return NULL;
+}
 #if IP_FORWARD
 /**
  * Determine whether an IP address is in a reserved set of addresses

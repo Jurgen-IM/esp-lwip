@@ -454,7 +454,7 @@ void netif_set_garp_flag(struct netif *netif);
 #endif
 
 void netif_remove(struct netif * netif);
-
+bool netif_added(struct netif *netif);
 /* Returns a network interface given its name. The name is of the form
    "et0", where the first two letters are the "name" field in the
    netif structure, and the digit is in the num field in the same
@@ -483,7 +483,7 @@ void netif_set_gw(struct netif *netif, const ip4_addr_t *gw);
 
 #define netif_set_flags(netif, set_flags)     do { (netif)->flags = (u8_t)((netif)->flags |  (set_flags)); } while(0)
 #define netif_clear_flags(netif, clr_flags)   do { (netif)->flags = (u8_t)((netif)->flags & (u8_t)(~(clr_flags) & 0xff)); } while(0)
-#define netif_is_flag_set(nefif, flag)        (((netif)->flags & (flag)) != 0)
+#define netif_is_flag_set(netif, flag)        (((netif)->flags & (flag)) != 0)
 
 void netif_set_up(struct netif *netif);
 void netif_set_down(struct netif *netif);
@@ -584,6 +584,7 @@ u8_t netif_name_to_index(const char *name);
 char * netif_index_to_name(u8_t idx, char *name);
 struct netif* netif_get_by_index(u8_t idx);
 
+struct netif* netif_get_next_active(struct netif* nf);
 /* Interface indexes always start at 1 per RFC 3493, section 4, num starts at 0 (internal index is 0..254)*/
 #define netif_get_index(netif)      ((u8_t)((netif)->num + 1))
 #define NETIF_NO_INDEX              (0)

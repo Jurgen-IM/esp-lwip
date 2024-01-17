@@ -400,6 +400,9 @@ udp_input(struct pbuf *p, struct netif *inp)
 #endif /* SO_REUSE && SO_REUSE_RXTOALL */
       /* callback */
       if (pcb->recv != NULL) {
+    	  if(inp != NULL){
+    		  pcb->netif_idx = netif_get_index(inp);
+    	  }
         /* now the recv function is responsible for freeing p */
         pcb->recv(pcb->recv_arg, pcb, p, ip_current_src_addr(), src);
       } else {
@@ -516,6 +519,7 @@ udp_send_chksum(struct udp_pcb *pcb, struct pbuf *p,
  *
  * @see udp_disconnect() udp_send()
  */
+
 err_t
 udp_sendto(struct udp_pcb *pcb, struct pbuf *p,
            const ip_addr_t *dst_ip, u16_t dst_port)
@@ -556,6 +560,7 @@ udp_sendto_chksum(struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *dst_ip,
 #endif
 
   LWIP_DEBUGF(UDP_DEBUG | LWIP_DBG_TRACE, ("udp_send\n"));
+
   if (pcb->netif_idx != NETIF_NO_INDEX) {
     netif = netif_get_by_index(pcb->netif_idx);
   } else {

@@ -268,7 +268,7 @@
  * not only for internal pools defined in memp_std.h)!
  */
 #if !defined MEMP_MEM_MALLOC || defined __DOXYGEN__
-#define MEMP_MEM_MALLOC                 0
+#define MEMP_MEM_MALLOC                 1
 #endif
 
 /**
@@ -506,9 +506,9 @@
  * The default number of timeouts is calculated here for all enabled modules.
  */
 #if ESP_LWIP
-#define LWIP_NUM_SYS_TIMEOUT_INTERNAL   (LWIP_TCP + IP_REASSEMBLY + (LWIP_ARP + (ESP_GRATUITOUS_ARP ? 1 : 0)) + (ESP_LWIP_DHCP_FINE_TIMERS_ONDEMAND ? LWIP_DHCP : 2*LWIP_DHCP + (ESP_DHCPS_TIMER ? 1 : 0)) + LWIP_AUTOIP + LWIP_IGMP + (ESP_LWIP_DNS_TIMERS_ONDEMAND ? 0 : LWIP_DNS) + PPP_NUM_TIMEOUTS + (LWIP_IPV6 * (1 + LWIP_IPV6_REASS + LWIP_IPV6_MLD)))
+#define LWIP_NUM_SYS_TIMEOUT_INTERNAL   (LWIP_TCP + IP_REASSEMBLY + (LWIP_ARP + (ESP_GRATUITOUS_ARP ? 1 : 0)) + (ESP_LWIP_DHCP_FINE_TIMERS_ONDEMAND ? LWIP_DHCP : 4*LWIP_DHCP + (ESP_DHCPS_TIMER ? 1 : 0)) + LWIP_AUTOIP + LWIP_IGMP + (ESP_LWIP_DNS_TIMERS_ONDEMAND ? 0 : LWIP_DNS) + PPP_NUM_TIMEOUTS + (LWIP_IPV6 * (1 + LWIP_IPV6_REASS + LWIP_IPV6_MLD)))
 #else
-#define LWIP_NUM_SYS_TIMEOUT_INTERNAL   (LWIP_TCP + IP_REASSEMBLY + LWIP_ARP + (2*LWIP_DHCP) + LWIP_AUTOIP + LWIP_IGMP + LWIP_DNS + PPP_NUM_TIMEOUTS + (LWIP_IPV6 * (1 + LWIP_IPV6_REASS + LWIP_IPV6_MLD)))
+#define LWIP_NUM_SYS_TIMEOUT_INTERNAL   (LWIP_TCP + IP_REASSEMBLY + LWIP_ARP + (4*LWIP_DHCP) + LWIP_AUTOIP + LWIP_IGMP + LWIP_DNS + PPP_NUM_TIMEOUTS + (LWIP_IPV6 * (1 + LWIP_IPV6_REASS + LWIP_IPV6_MLD)))
 #endif
 /**
  * MEMP_NUM_SYS_TIMEOUT: the number of simultaneously active timeouts.
@@ -516,7 +516,7 @@
  * The formula expects settings to be either '0' or '1'.
  */
 #if !defined MEMP_NUM_SYS_TIMEOUT || defined __DOXYGEN__
-#define MEMP_NUM_SYS_TIMEOUT            LWIP_NUM_SYS_TIMEOUT_INTERNAL
+#define MEMP_NUM_SYS_TIMEOUT            (LWIP_NUM_SYS_TIMEOUT_INTERNAL+16) //3*ip_lost_timer+3*netif_set_garp_flag+2*ping+dhcps+2*sntp+4*dns+ 2*reserved
 #endif
 
 /**
@@ -550,7 +550,7 @@
  * (only needed if you use tcpip.c)
  */
 #if !defined MEMP_NUM_TCPIP_MSG_API || defined __DOXYGEN__
-#define MEMP_NUM_TCPIP_MSG_API          8
+#define MEMP_NUM_TCPIP_MSG_API          16
 #endif
 
 /**
@@ -559,7 +559,7 @@
  * (only needed if you use tcpip.c)
  */
 #if !defined MEMP_NUM_TCPIP_MSG_INPKT || defined __DOXYGEN__
-#define MEMP_NUM_TCPIP_MSG_INPKT        8
+#define MEMP_NUM_TCPIP_MSG_INPKT        16
 #endif
 
 /**
@@ -1127,12 +1127,12 @@
 
 /** DNS maximum number of entries to maintain locally. */
 #if !defined DNS_TABLE_SIZE || defined __DOXYGEN__
-#define DNS_TABLE_SIZE                  4
+#define DNS_TABLE_SIZE                  12
 #endif
 
 /** DNS maximum host name length supported in the name table. */
 #if !defined DNS_MAX_NAME_LENGTH || defined __DOXYGEN__
-#define DNS_MAX_NAME_LENGTH             256
+#define DNS_MAX_NAME_LENGTH             96
 #endif
 
 /** The maximum of DNS servers
@@ -1140,12 +1140,12 @@
  * DNS_SERVER_ADDRESS(ipaddr), where 'ipaddr' is an 'ip_addr_t*'
  */
 #if !defined DNS_MAX_SERVERS || defined __DOXYGEN__
-#define DNS_MAX_SERVERS                 2
+#define DNS_MAX_SERVERS                 DNS_MAX_SERVERS_PER_NETIF
 #endif
 
 /** DNS maximum number of retries when asking for a name, before "timeout". */
 #if !defined DNS_MAX_RETRIES || defined __DOXYGEN__
-#define DNS_MAX_RETRIES                 4
+#define DNS_MAX_RETRIES                 2
 #endif
 
 /** DNS do a name checking between the query and the response. */
@@ -1349,7 +1349,7 @@
  * as much as (2 * TCP_SND_BUF/TCP_MSS) for things to work.
  */
 #if !defined TCP_SND_QUEUELEN || defined __DOXYGEN__
-#define TCP_SND_QUEUELEN                ((4 * (TCP_SND_BUF) + (TCP_MSS - 1))/(TCP_MSS))
+#define TCP_SND_QUEUELEN(pcb)                ((4 * (pcb->cfg_snd) + (pcb->cfg_mss - 1))/(pcb->cfg_mss))
 #endif
 
 /**
@@ -1358,7 +1358,7 @@
  * TCP snd_buf for select to return writable (combined with TCP_SNDQUEUELOWAT).
  */
 #if !defined TCP_SNDLOWAT || defined __DOXYGEN__
-#define TCP_SNDLOWAT                    LWIP_MIN(LWIP_MAX(((TCP_SND_BUF)/2), (2 * TCP_MSS) + 1), (TCP_SND_BUF) - 1)
+#define TCP_SNDLOWAT(pcb)                    (LWIP_MIN(LWIP_MAX(((pcb->cfg_snd)/2), (2 * pcb->cfg_mss) + 1), (pcb->cfg_snd) - 1))
 #endif
 
 /**
@@ -1367,7 +1367,7 @@
  * this number, select returns writable (combined with TCP_SNDLOWAT).
  */
 #if !defined TCP_SNDQUEUELOWAT || defined __DOXYGEN__
-#define TCP_SNDQUEUELOWAT               LWIP_MAX(((TCP_SND_QUEUELEN)/2), 5)
+#define TCP_SNDQUEUELOWAT(pcb)               LWIP_MAX(((TCP_SND_QUEUELEN(pcb))/2), 5)
 #endif
 
 /**
@@ -1447,7 +1447,8 @@
  * TCP_MSS/4: Try to create 4 fragments or less per TCP packet.
  */
 #if !defined TCP_OVERSIZE || defined __DOXYGEN__
-#define TCP_OVERSIZE                    TCP_MSS
+#define TCP_OVERSIZE							(1)
+#define TCP_OVERSIZE_VAL(pcb)                   ((pcb==NULL) ? TCP_MSS :pcb->cfg_mss)
 #endif
 
 /**
@@ -1465,7 +1466,7 @@
  * explicit window update
  */
 #if !defined TCP_WND_UPDATE_THRESHOLD || defined __DOXYGEN__
-#define TCP_WND_UPDATE_THRESHOLD        LWIP_MIN((TCP_WND / 4), (TCP_MSS * 4))
+#define TCP_WND_UPDATE_THRESHOLD(pcb)        LWIP_MIN((pcb->cfg_wnd / 4), (pcb->cfg_mss * 4))
 #endif
 
 /**
@@ -1580,7 +1581,7 @@
  * TCP_MSS, IP header, and link header.
  */
 #if !defined PBUF_POOL_BUFSIZE || defined __DOXYGEN__
-#define PBUF_POOL_BUFSIZE               LWIP_MEM_ALIGN_SIZE(TCP_MSS+40+PBUF_LINK_ENCAPSULATION_HLEN+PBUF_LINK_HLEN)
+#define PBUF_POOL_BUFSIZE               LWIP_MEM_ALIGN_SIZE(TCP_MSS+PBUF_IP_HLEN+PBUF_TRANSPORT_HLEN+PBUF_LINK_ENCAPSULATION_HLEN+PBUF_LINK_HLEN)
 #endif
 
 /**
@@ -2498,7 +2499,7 @@
  * network startup.
  */
 #if !defined LWIP_IPV6_SEND_ROUTER_SOLICIT || defined __DOXYGEN__
-#define LWIP_IPV6_SEND_ROUTER_SOLICIT   1
+#define LWIP_IPV6_SEND_ROUTER_SOLICIT   LWIP_IPV6
 #endif
 
 /**
@@ -2775,7 +2776,7 @@
  * (up to the maximum limit defined here).
  */
 #if !defined LWIP_DHCP6_MAX_DNS_SERVERS || defined __DOXYGEN__
-#define LWIP_DHCP6_MAX_DNS_SERVERS      DNS_MAX_SERVERS
+#define LWIP_DHCP6_MAX_DNS_SERVERS     DNS_MAX_SERVERS_PER_NETIF
 #endif
 /**
  * @}

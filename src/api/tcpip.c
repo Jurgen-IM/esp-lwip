@@ -68,7 +68,7 @@ sys_thread_t g_lwip_task = 0;
 
 #if LWIP_TCPIP_CORE_LOCKING
 /** The global semaphore to lock the stack. */
-sys_mutex_t lock_tcpip_core;
+sys_mutex_t lock_tcpip_core=NULL;
 #endif /* LWIP_TCPIP_CORE_LOCKING */
 
 static void tcpip_thread_handle_msg(struct tcpip_msg *msg);

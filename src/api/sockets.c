@@ -981,6 +981,7 @@ lwip_recv_tcp(struct lwip_sock *sock, void *mem, size_t len, int flags)
 {
   u8_t apiflags = NETCONN_NOAUTORCVD;
   ssize_t recvd = 0;
+  ssize_t recvdPeek = 0;
   ssize_t recv_left = (len <= SSIZE_MAX) ? (ssize_t)len : SSIZE_MAX;
 
   LWIP_ASSERT("no socket given", sock != NULL);
@@ -991,15 +992,13 @@ lwip_recv_tcp(struct lwip_sock *sock, void *mem, size_t len, int flags)
   }
 
   do {
-    struct pbuf *p;
+    struct pbuf *p=NULL;
     err_t err;
     u16_t copylen;
 
     LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_recv_tcp: top while sock->lastdata=%p\n", (void *)sock->lastdata.pbuf));
     /* Check if there is data left from the last recv operation. */
-    if (sock->lastdata.pbuf) {
-      p = sock->lastdata.pbuf;
-    } else {
+
       /* No data was left from the previous operation, so we try to get
          some from the network. */
       err = netconn_recv_tcp_pbuf_flags(sock->conn, &p, apiflags);
@@ -1018,13 +1017,22 @@ lwip_recv_tcp(struct lwip_sock *sock, void *mem, size_t len, int flags)
         sock_set_errno(sock, err_to_errno(err));
         if (err == ERR_CLSD) {
           return 0;
-        } else {
+	  } else if(sock->lastdata.pbuf==NULL){
           return -1;
         }
-      }
-      LWIP_ASSERT("p != NULL", p != NULL);
-      sock->lastdata.pbuf = p;
+    }else if (flags & MSG_PEEK){
+    	recvdPeek = p->tot_len;
     }
+
+    if(p==NULL && sock->lastdata.pbuf==NULL){
+    	return -1;
+    }else if(sock->lastdata.pbuf==NULL){
+      sock->lastdata.pbuf = p;
+    }else if(p!=NULL){
+  	  pbuf_cat(sock->lastdata.pbuf,p);
+    }
+
+    p = sock->lastdata.pbuf;
 
     LWIP_DEBUGF(SOCKETS_DEBUG, ("lwip_recv_tcp: buflen=%"U16_F" recv_left=%d off=%d\n",
                                 p->tot_len, (int)recv_left, (int)recvd));
@@ -1073,9 +1081,19 @@ lwip_recv_tcp_done:
     /* ensure window update after copying all data */
     netconn_tcp_recvd(sock->conn, (size_t)recvd);
   }
+  else if(recvdPeek > 0 && (flags & MSG_PEEK)){
+	  int max_wnd = TCP_WND*2;
+	  if(sock->conn->pcb.tcp != NULL){
+		  max_wnd = sock->conn->pcb.tcp->cfg_wnd;
+	  }
+	  if(sock->lastdata.pbuf != NULL && sock->lastdata.pbuf->tot_len < max_wnd){
+	  netconn_tcp_recvd(sock->conn, (size_t)recvdPeek);
+	  }
+  }
   sock_set_errno(sock, 0);
   return recvd;
 }
+
 #endif
 
 /* Convert a netbuf's address data to struct sockaddr */
@@ -3074,9 +3092,86 @@ lwip_getsockopt_impl(int s, int level, int optname, void *optval, socklen_t *opt
 #if LWIP_SO_RCVBUF
         case SO_RCVBUF:
           LWIP_SOCKOPT_CHECK_OPTLEN_CONN(sock, *optlen, int);
+          if(NETCONNTYPE_GROUP(netconn_type(sock->conn)) != NETCONN_TCP)
           *(int *)optval = netconn_get_recvbufsize(sock->conn);
+          else
+          {
+        	  if(sock->conn->pcb.tcp)
+        		  *(int *)optval = sock->conn->pcb.tcp->cfg_wnd;
+        	  else
+        	  {
+        		  *(int *)optval = 0;
+        		  err = ENOENT;
+        	  }
+          }
           break;
 #endif /* LWIP_SO_RCVBUF */
+        case SO_SNDBUF:
+          LWIP_SOCKOPT_CHECK_OPTLEN_CONN(sock, *optlen, int);
+          if(NETCONNTYPE_GROUP(netconn_type(sock->conn)) != NETCONN_TCP)
+          {
+        	  *(int *)optval = 0;
+          	  err = ENOPROTOOPT;
+          }
+          else
+          {
+        	  if(sock->conn->pcb.tcp)
+        		  *(int *)optval = sock->conn->pcb.tcp->cfg_snd;
+        	  else
+        	  {
+        		  *(int *)optval = 0;
+        		  err = ENOENT;
+        	  }
+          }
+          break;	
+        case SO_MSSBUF:
+          LWIP_SOCKOPT_CHECK_OPTLEN_CONN(sock, *optlen, int);
+          if(NETCONNTYPE_GROUP(netconn_type(sock->conn)) != NETCONN_TCP)
+          {
+        	  *(int *)optval = 0;
+          	  err = ENOPROTOOPT;
+          }
+          else
+          {
+        	  if(sock->conn->pcb.tcp)
+        		  *(int *)optval = sock->conn->pcb.tcp->cfg_mss;
+        	  else
+        	  {
+        		  *(int *)optval = 0;
+        		  err = ENOENT;
+        	  }
+          }
+          break;
+        case SO_LOCALIP:
+          LWIP_SOCKOPT_CHECK_OPTLEN_CONN(sock, *optlen, ip_addr_t);
+          if(NETCONNTYPE_GROUP(netconn_type(sock->conn)) != NETCONN_TCP)
+          {
+          	  err = ENOPROTOOPT;
+          }
+          else
+          {
+        	  if(sock->conn->pcb.tcp)
+        	  {
+        		  struct netif *netif;
+        		  if(!ip_addr_isany(&sock->conn->pcb.tcp->local_ip))
+        		  {
+        			  *(ip_addr_t *)optval = sock->conn->pcb.tcp->local_ip;
+        		  }
+        		  else if((netif=netif_get_by_index(sock->conn->pcb.tcp->netif_idx)) != NULL)
+        		  {
+        			  *(ip_addr_t *)optval = *ip4_netif_get_local_ip(netif);
+        		  }
+            	  else
+            	  {
+            		  err = ENOENT;
+            	  }
+        	  }
+        	  else
+        	  {
+        		  err = ENOENT;
+        	  }
+          }
+          break;
 #if LWIP_SO_LINGER
         case SO_LINGER: {
           s16_t conn_linger;
@@ -3508,9 +3603,56 @@ lwip_setsockopt_impl(int s, int level, int optname, const void *optval, socklen_
 #if LWIP_SO_RCVBUF
         case SO_RCVBUF:
           LWIP_SOCKOPT_CHECK_OPTLEN_CONN(sock, optlen, int);
+
+          if(NETCONNTYPE_GROUP(netconn_type(sock->conn)) != NETCONN_TCP)
           netconn_set_recvbufsize(sock->conn, *(const int *)optval);
+          else
+          {
+        	  if(sock->conn->pcb.tcp)
+        	  {
+        	  	  sock->conn->pcb.tcp->cfg_wnd = *(const int *)optval;
+        	  	  sock->conn->pcb.tcp->rcv_wnd = sock->conn->pcb.tcp->rcv_ann_wnd = sock->conn->pcb.tcp->cfg_wnd;
+        	  }
+        	  else
+        	  {
+        		  err = ENOENT;
+        	  }
+          }
           break;
 #endif /* LWIP_SO_RCVBUF */
+        case SO_SNDBUF:
+          LWIP_SOCKOPT_CHECK_OPTLEN_CONN(sock, optlen, int);
+          if(NETCONNTYPE_GROUP(netconn_type(sock->conn)) != NETCONN_TCP)
+          	  err = ENOPROTOOPT;
+          else
+          {
+        	  if(sock->conn->pcb.tcp)
+        	  {
+        		  sock->conn->pcb.tcp->cfg_snd = sock->conn->pcb.tcp->snd_buf = sock->conn->pcb.tcp->ssthresh= *(const int *)optval;
+        	  }
+        	  else
+        	  {
+        		  err = ENOENT;
+        	  }
+          }
+          break;																
+        case SO_MSSBUF:
+          LWIP_SOCKOPT_CHECK_OPTLEN_CONN(sock, optlen, int);
+          if(NETCONNTYPE_GROUP(netconn_type(sock->conn)) != NETCONN_TCP)
+          	  err = ENOPROTOOPT;
+          else
+          {
+        	  if(sock->conn->pcb.tcp)
+        	  {
+            	  sock->conn->pcb.tcp->cfg_mss = *(const int *)optval;
+            	  sock->conn->pcb.tcp->mss = (sock->conn->pcb.tcp->cfg_mss > 536) ? 536 : sock->conn->pcb.tcp->cfg_mss;
+        	  }
+        	  else
+        	  {
+        		  err = ENOENT;
+        	  }
+          }
+          break;						  
 #if LWIP_SO_LINGER
         case SO_LINGER: {
           const struct linger *linger = (const struct linger *)optval;

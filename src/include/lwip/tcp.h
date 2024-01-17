@@ -137,12 +137,12 @@ typedef err_t (*tcp_connected_fn)(void *arg, struct tcp_pcb *tpcb, err_t err);
 #define RCV_WND_SCALE(pcb, wnd) (((wnd) >> (pcb)->rcv_scale))
 #define SND_WND_SCALE(pcb, wnd) (((wnd) << (pcb)->snd_scale))
 #define TCPWND16(x)             ((u16_t)LWIP_MIN((x), 0xFFFF))
-#define TCP_WND_MAX(pcb)        ((tcpwnd_size_t)(((pcb)->flags & TF_WND_SCALE) ? TCP_WND : TCPWND16(TCP_WND)))
+#define TCP_WND_MAX(pcb)        ((tcpwnd_size_t)(((pcb)->flags & TF_WND_SCALE) ? pcb->cfg_wnd : TCPWND16(pcb->cfg_wnd)))
 #else
 #define RCV_WND_SCALE(pcb, wnd) (wnd)
 #define SND_WND_SCALE(pcb, wnd) (wnd)
 #define TCPWND16(x)             (x)
-#define TCP_WND_MAX(pcb)        TCP_WND
+#define TCP_WND_MAX(pcb)        (pcb->cfg_wnd)
 #endif
 /* Increments a tcpwnd_size_t and holds at max value rather than rollover */
 #define TCP_WND_INC(wnd, inc)   do { \
@@ -215,8 +215,11 @@ typedef u16_t tcpflags_t;
   TCP_PCB_EXTARGS \
   enum tcp_state state; /* TCP state */ \
   u8_t prio; \
-  /* ports are in host byte order */ \
-  u16_t local_port
+  u16_t local_port;  /* ports are in host byte order */\
+  u16_t cfg_mss;    /* maximum segment size default TCP_MSS*/ \
+  tcpwnd_size_t cfg_wnd;   /* receiver window default TCP_WND*/ \
+  /* buffer space for sending (in bytes) TCP_SND_BUF*/\
+  tcpwnd_size_t  cfg_snd		
 
 
 /** the TCP protocol control block for listening pcbs */
@@ -468,6 +471,8 @@ struct tcp_pcb * tcp_listen_with_backlog(struct tcp_pcb *pcb, u8_t backlog);
 
 void             tcp_abort (struct tcp_pcb *pcb);
 err_t            tcp_close   (struct tcp_pcb *pcb);
+err_t            tcp_close_ext(struct tcp_pcb *pcb, u8_t rst_on_unacked_data);
+
 err_t            tcp_shutdown(struct tcp_pcb *pcb, int shut_rx, int shut_tx);
 
 err_t            tcp_write   (struct tcp_pcb *pcb, const void *dataptr, u16_t len,

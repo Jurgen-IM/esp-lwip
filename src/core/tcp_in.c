@@ -660,7 +660,7 @@ tcp_listen_input(struct tcp_pcb_listen *pcb)
       return;
     }
 #endif /* TCP_LISTEN_BACKLOG */
-    npcb = tcp_alloc(pcb->prio);
+    npcb = tcp_alloc(pcb->prio, pcb);
     /* If a new PCB could not be created (probably due to lack of memory),
        we don't do anything, but rely on the sender will retransmit the
        SYN at a time when we have more memory available. */
@@ -1975,7 +1975,7 @@ tcp_parseopt(struct tcp_pcb *pcb)
           mss = (u16_t)(tcp_get_next_optbyte() << 8);
           mss |= tcp_get_next_optbyte();
           /* Limit the mss to the configured TCP_MSS and prevent division by zero */
-          pcb->mss = ((mss > TCP_MSS) || (mss == 0)) ? TCP_MSS : mss;
+          pcb->mss = ((mss > pcb->cfg_mss) || (mss == 0)) ? pcb->cfg_mss : mss;
           break;
 #if LWIP_WND_SCALE
         case LWIP_TCP_OPT_WS:

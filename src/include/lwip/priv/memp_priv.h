@@ -118,15 +118,19 @@ struct memp_desc {
   /** Element size */
   u16_t size;
 
-#if !MEMP_MEM_MALLOC
+					
   /** Number of elements */
   u16_t num;
+#if !MEMP_MEM_MALLOC
 
   /** Base address */
   u8_t *base;
 
   /** First free element of each pool. Elements form a linked list. */
   struct memp **tab;
+#else
+  /** Number of current elements */
+  u16_t *cnum;
 #endif /* MEMP_MEM_MALLOC */
 };
 

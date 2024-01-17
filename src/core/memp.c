@@ -175,7 +175,8 @@ void
 memp_init_pool(const struct memp_desc *desc)
 {
 #if MEMP_MEM_MALLOC
-  LWIP_UNUSED_ARG(desc);
+//  LWIP_UNUSED_ARG(desc);
+	*desc->cnum = 0;
 #else
   int i;
   struct memp *memp;
@@ -251,6 +252,8 @@ do_memp_malloc_pool_fn(const struct memp_desc *desc, const char *file, const int
   SYS_ARCH_DECL_PROTECT(old_level);
 
 #if MEMP_MEM_MALLOC
+  if(*desc->cnum >= desc->num)
+	  return NULL;
   memp = (struct memp *)mem_malloc(MEMP_SIZE + MEMP_ALIGN_SIZE(desc->size));
   SYS_ARCH_PROTECT(old_level);
 #else /* MEMP_MEM_MALLOC */
@@ -269,6 +272,8 @@ do_memp_malloc_pool_fn(const struct memp_desc *desc, const char *file, const int
 #if MEMP_OVERFLOW_CHECK
     memp->next = NULL;
 #endif /* MEMP_OVERFLOW_CHECK */
+#else
+    (*desc->cnum)++;
 #endif /* !MEMP_MEM_MALLOC */
 #if MEMP_OVERFLOW_CHECK
     memp->file = file;
@@ -381,6 +386,8 @@ do_memp_free_pool(const struct memp_desc *desc, void *mem)
   LWIP_UNUSED_ARG(desc);
   SYS_ARCH_UNPROTECT(old_level);
   mem_free(memp);
+  if(*desc->cnum)
+	  (*desc->cnum)--;
 #else /* MEMP_MEM_MALLOC */
   memp->next = *desc->tab;
   *desc->tab = memp;

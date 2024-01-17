@@ -134,13 +134,6 @@
 #define TCP_KEEP_INTVL(pcb) TCP_KEEPINTVL_DEFAULT
 #endif /* LWIP_TCP_KEEPALIVE */
 
-/* As initial send MSS, we use TCP_MSS but limit it to 536. */
-#if TCP_MSS > 536
-#define INITIAL_MSS 536
-#else
-#define INITIAL_MSS TCP_MSS
-#endif
-
 static const char *const tcp_state_str[] = {
   "CLOSED",
   "LISTEN",
@@ -893,6 +886,9 @@ tcp_listen_with_backlog_and_err(struct tcp_pcb *pcb, u8_t backlog, err_t *err)
   lpcb->netif_idx = NETIF_NO_INDEX;
   lpcb->ttl = pcb->ttl;
   lpcb->tos = pcb->tos;
+  lpcb->cfg_mss = pcb->cfg_mss;
+  lpcb->cfg_wnd = pcb->cfg_wnd;
+  lpcb->cfg_snd = pcb->cfg_snd;									
 #if LWIP_IPV4 && LWIP_IPV6
   IP_SET_TYPE_VAL(lpcb->remote_ip, pcb->local_ip.type);
 #endif /* LWIP_IPV4 && LWIP_IPV6 */
@@ -935,7 +931,7 @@ tcp_update_rcv_ann_wnd(struct tcp_pcb *pcb)
   LWIP_ASSERT("tcp_update_rcv_ann_wnd: invalid pcb", pcb != NULL);
   new_right_edge = pcb->rcv_nxt + pcb->rcv_wnd;
 
-  if (TCP_SEQ_GEQ(new_right_edge, pcb->rcv_ann_right_edge + LWIP_MIN((TCP_WND / 2), pcb->mss))) {
+  if (TCP_SEQ_GEQ(new_right_edge, pcb->rcv_ann_right_edge + LWIP_MIN((pcb->cfg_wnd / 2), pcb->mss))) {
     /* we can advertise more window */
     pcb->rcv_ann_wnd = pcb->rcv_wnd;
     return new_right_edge - pcb->rcv_ann_right_edge;
@@ -994,7 +990,7 @@ tcp_recved(struct tcp_pcb *pcb, u16_t len)
    * watermark is TCP_WND/4), then send an explicit update now.
    * Otherwise wait for a packet to be sent in the normal course of
    * events (or more window to be available later) */
-  if (wnd_inflation >= TCP_WND_UPDATE_THRESHOLD) {
+  if (wnd_inflation >= TCP_WND_UPDATE_THRESHOLD(pcb)) {
     tcp_ack_now(pcb);
     tcp_output(pcb);
   }
@@ -1150,12 +1146,12 @@ tcp_connect(struct tcp_pcb *pcb, const ip_addr_t *ipaddr, u16_t port,
   pcb->snd_lbb = iss - 1;
   /* Start with a window that does not need scaling. When window scaling is
      enabled and used, the window is enlarged when both sides agree on scaling. */
-  pcb->rcv_wnd = pcb->rcv_ann_wnd = TCPWND_MIN16(TCP_WND);
+  pcb->rcv_wnd = pcb->rcv_ann_wnd = TCPWND_MIN16(pcb->cfg_wnd);
   pcb->rcv_ann_right_edge = pcb->rcv_nxt;
-  pcb->snd_wnd = TCP_WND;
+  pcb->snd_wnd = pcb->cfg_wnd;
   /* As initial send MSS, we use TCP_MSS but limit it to 536.
      The send MSS is updated when an MSS option is received. */
-  pcb->mss = INITIAL_MSS;
+  pcb->mss = (pcb->cfg_mss > 536) ? 536 : pcb->cfg_mss;
 #if TCP_CALCULATE_EFF_SEND_MSS
   pcb->mss = tcp_eff_send_mss_netif(pcb->mss, netif, &pcb->remote_ip);
 #endif /* TCP_CALCULATE_EFF_SEND_MSS */
@@ -1888,7 +1884,7 @@ void tcp_pcb_num_cal(tcp_pcb_num_t *tcp_pcb_num)
  * @return a new tcp_pcb that initially is in state CLOSED
  */
 struct tcp_pcb *
-tcp_alloc(u8_t prio)
+tcp_alloc(u8_t prio, struct tcp_pcb_listen *tpcb)
 {
   struct tcp_pcb *pcb;
 #if ESP_LWIP 
@@ -1977,14 +1973,17 @@ tcp_alloc(u8_t prio)
     /* zero out the whole pcb, so there is no need to initialize members to zero */
     memset(pcb, 0, sizeof(struct tcp_pcb));
     pcb->prio = prio;
-    pcb->snd_buf = TCP_SND_BUF;
+    pcb->cfg_snd = (tpcb == NULL) ? TCP_SND_BUF : tpcb->cfg_snd;
+    pcb->snd_buf = pcb->cfg_snd;
     /* Start with a window that does not need scaling. When window scaling is
        enabled and used, the window is enlarged when both sides agree on scaling. */
-    pcb->rcv_wnd = pcb->rcv_ann_wnd = TCPWND_MIN16(TCP_WND);
+    pcb->cfg_wnd = (tpcb==NULL) ? TCP_WND : tpcb->cfg_wnd;
+    pcb->rcv_wnd = pcb->rcv_ann_wnd = TCPWND_MIN16(pcb->cfg_wnd);
     pcb->ttl = TCP_TTL;
     /* As initial send MSS, we use TCP_MSS but limit it to 536.
        The send MSS is updated when an MSS option is received. */
-    pcb->mss = INITIAL_MSS;
+    pcb->cfg_mss = (tpcb==NULL) ? TCP_MSS : tpcb->cfg_mss;
+    pcb->mss = (pcb->cfg_mss > 536) ? 536 : pcb->cfg_mss;
 #if ESP_LWIP
     /* make TCP's retransmission time to be configurable */
     pcb->rto = LWIP_TCP_RTO_TIME / TCP_SLOW_INTERVAL;
@@ -2004,7 +2003,7 @@ tcp_alloc(u8_t prio)
     initial advertised window is very small and then grows rapidly once the
     connection is established. To avoid these complications, we set ssthresh to the
     largest effective cwnd (amount of in-flight data) that the sender can have. */
-    pcb->ssthresh = TCP_SND_BUF;
+    pcb->ssthresh = pcb->cfg_snd;
 
 #if LWIP_CALLBACK_API
     pcb->recv = tcp_recv_null;
@@ -2039,7 +2038,7 @@ tcp_alloc(u8_t prio)
 struct tcp_pcb *
 tcp_new(void)
 {
-  return tcp_alloc(TCP_PRIO_NORMAL);
+  return tcp_alloc(TCP_PRIO_NORMAL, NULL);
 }
 
 /**
@@ -2058,7 +2057,7 @@ struct tcp_pcb *
 tcp_new_ip_type(u8_t type)
 {
   struct tcp_pcb *pcb;
-  pcb = tcp_alloc(TCP_PRIO_NORMAL);
+  pcb = tcp_alloc(TCP_PRIO_NORMAL, NULL);
 #if LWIP_IPV4 && LWIP_IPV6
   if (pcb != NULL) {
     IP_SET_TYPE_VAL(pcb->local_ip, type);
@@ -2346,8 +2345,15 @@ tcp_eff_send_mss_netif(u16_t sendmss, struct netif *outif, const ip_addr_t *dest
   if (IP_IS_V6(dest))
 #endif /* LWIP_IPV4 */
   {
+#if LWIP_ND6
     /* First look in destination cache, to see if there is a Path MTU. */
     mtu = nd6_get_destination_mtu(ip_2_ip6(dest), outif);
+#else
+    if (outif == NULL) {
+      return sendmss;
+    }
+    mtu = netif_mtu6(outif);
+#endif /* LWIP_ND6 */
   }
 #if LWIP_IPV4
   else

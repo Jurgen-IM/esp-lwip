@@ -1717,6 +1717,37 @@ netif_get_by_index(u8_t idx)
   return NULL;
 }
 
+struct netif* netif_get_next_active(struct netif* nf)
+{
+	if(nf==NULL)
+	{
+		nf = netif_list;
+	}
+	else
+	{
+		nf=nf->next;
+	}
+	for(struct netif* netif=nf; netif!=NULL;netif=netif->next)
+	{
+		if (netif_is_up(netif) && netif_is_link_up(netif) && !ip4_addr_isany_val(*netif_ip4_addr(netif)) && (netif_ip4_addr(netif)->addr != PP_HTONL(IPADDR_LOOPBACK)))
+		{
+			return netif;
+		}
+	}
+	return NULL;
+}
+
+
+bool netif_added(struct netif *netif)
+{
+	  struct netif *_netif;
+	    NETIF_FOREACH(_netif) {
+	    	if(netif == _netif)
+	    		return true;
+	    }
+
+	  return false;
+}
 /**
  * @ingroup netif
  * Find a network interface by searching for its name

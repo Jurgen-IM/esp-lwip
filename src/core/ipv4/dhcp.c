@@ -155,7 +155,7 @@ static inline u32_t timeout_from_offered(u32_t lease, u32_t min, u32_t max)
 #if DNS_MAX_SERVERS > LWIP_DHCP_MAX_DNS_SERVERS
 #define LWIP_DHCP_PROVIDE_DNS_SERVERS LWIP_DHCP_MAX_DNS_SERVERS
 #else
-#define LWIP_DHCP_PROVIDE_DNS_SERVERS DNS_MAX_SERVERS
+#define LWIP_DHCP_PROVIDE_DNS_SERVERS 2
 #endif
 #else
 #define LWIP_DHCP_PROVIDE_DNS_SERVERS 0
@@ -857,13 +857,8 @@ dhcp_handle_ack(struct netif *netif, struct dhcp_msg *msg_in)
   /* DNS servers */
   for (n = 0; (n < LWIP_DHCP_PROVIDE_DNS_SERVERS) && dhcp_option_given(dhcp, DHCP_OPTION_IDX_DNS_SERVER + n); n++) {
     ip_addr_t dns_addr;
-#if ESP_DNS
-    if (n == DNS_FALLBACK_SERVER_INDEX) {
-        continue;
-    }
-#endif
     ip_addr_set_ip4_u32_val(dns_addr, lwip_htonl(dhcp_get_option_value(dhcp, DHCP_OPTION_IDX_DNS_SERVER + n)));
-    dns_setserver(n, &dns_addr);
+    dns_setserver(n, netif, &dns_addr);
   }
 #endif /* LWIP_DHCP_PROVIDE_DNS_SERVERS */
 }

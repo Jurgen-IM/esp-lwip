@@ -62,7 +62,11 @@ static const struct snmp_obj_id *snmp_auth_algo_to_oid(snmpv3_auth_algo_t algo)
   if (algo == SNMP_V3_AUTH_ALGO_MD5) {
     return &usmHMACMD5AuthProtocol;
   } else if (algo ==  SNMP_V3_AUTH_ALGO_SHA) {
-    return &usmHMACMD5AuthProtocol;
+    return &usmHMACSHAAuthProtocol;
+  } else if (algo ==  SNMP_V3_AUTH_ALGO_SHA256) {
+    return &usmHMACSHA256AuthProtocol;
+  }else if (algo ==  SNMP_V3_AUTH_ALGO_SHA512) {
+    return &usmHMACSHA512AuthProtocol;
   }
 
   return &usmNoAuthProtocol;
@@ -74,6 +78,10 @@ static const struct snmp_obj_id *snmp_priv_algo_to_oid(snmpv3_priv_algo_t algo)
     return &usmDESPrivProtocol;
   } else if (algo == SNMP_V3_PRIV_ALGO_AES) {
     return &usmAESPrivProtocol;
+  } else if (algo == SNMP_V3_PRIV_ALGO_AES192) {
+    return &usmAES192PrivProtocol;
+  } else if (algo == SNMP_V3_PRIV_ALGO_AES256) {
+    return &usmAES256PrivProtocol;
   }
 
   return &usmNoPrivProtocol;

@@ -389,8 +389,8 @@ poll_tcp(void *arg, struct tcp_pcb *pcb)
   if (conn->flags & NETCONN_FLAG_CHECK_WRITESPACE) {
     /* If the queued byte- or pbuf-count drops below the configured low-water limit,
        let select mark this pcb as writable again. */
-    if ((conn->pcb.tcp != NULL) && (tcp_sndbuf(conn->pcb.tcp) > TCP_SNDLOWAT) &&
-        (tcp_sndqueuelen(conn->pcb.tcp) < TCP_SNDQUEUELOWAT)) {
+    if ((conn->pcb.tcp != NULL) && (tcp_sndbuf(conn->pcb.tcp) > TCP_SNDLOWAT(conn->pcb.tcp)) &&
+        (tcp_sndqueuelen(conn->pcb.tcp) < TCP_SNDQUEUELOWAT(conn->pcb.tcp))) {
       netconn_clear_flags(conn, NETCONN_FLAG_CHECK_WRITESPACE);
       API_EVENT(conn, NETCONN_EVT_SENDPLUS, 0);
     }
@@ -423,8 +423,8 @@ sent_tcp(void *arg, struct tcp_pcb *pcb, u16_t len)
 
     /* If the queued byte- or pbuf-count drops below the configured low-water limit,
        let select mark this pcb as writable again. */
-    if ((conn->pcb.tcp != NULL) && (tcp_sndbuf(conn->pcb.tcp) > TCP_SNDLOWAT) &&
-        (tcp_sndqueuelen(conn->pcb.tcp) < TCP_SNDQUEUELOWAT)) {
+    if ((conn->pcb.tcp != NULL) && (tcp_sndbuf(conn->pcb.tcp) > TCP_SNDLOWAT(conn->pcb.tcp)) &&
+        (tcp_sndqueuelen(conn->pcb.tcp) < TCP_SNDQUEUELOWAT(conn->pcb.tcp))) {
       netconn_clear_flags(conn, NETCONN_FLAG_CHECK_WRITESPACE);
       API_EVENT(conn, NETCONN_EVT_SENDPLUS, len);
     }
@@ -1840,8 +1840,8 @@ err_mem:
            and let poll_tcp check writable space to mark the pcb writable again */
         API_EVENT(conn, NETCONN_EVT_SENDMINUS, 0);
         conn->flags |= NETCONN_FLAG_CHECK_WRITESPACE;
-      } else if ((tcp_sndbuf(conn->pcb.tcp) <= TCP_SNDLOWAT) ||
-                 (tcp_sndqueuelen(conn->pcb.tcp) >= TCP_SNDQUEUELOWAT)) {
+      } else if ((tcp_sndbuf(conn->pcb.tcp) <= TCP_SNDLOWAT(conn->pcb.tcp)) ||
+                 (tcp_sndqueuelen(conn->pcb.tcp) >= TCP_SNDQUEUELOWAT(conn->pcb.tcp))) {
         /* The queued byte- or pbuf-count exceeds the configured low-water limit,
            let select mark this pcb as non-writable. */
         API_EVENT(conn, NETCONN_EVT_SENDMINUS, 0);
@@ -2288,6 +2288,59 @@ lwip_netconn_do_gethostbyname(void *arg)
     sys_sem_signal(API_EXPR_REF_SEM(msg->sem));
   }
 #endif /* LWIP_TCPIP_CORE_LOCKING */
+}
+
+
+/**
+ * Callback function that is called when DNS name is resolved
+ * (or on timeout). A waiting application thread is waked up by
+ * signaling the semaphore.
+ */
+
+static void
+lwip_netconn_do_dns_found_nb(const char *name, const ip_addr_t *ipaddr, void *arg)
+{
+  struct dns_api_msg_nb *msg = (struct dns_api_msg_nb *)arg;
+
+  /* we trust the internal implementation to be correct :-) */
+  LWIP_UNUSED_ARG(name);
+  if (ipaddr == NULL) {
+    /* timeout or memory error */
+    msg->err = ERR_VAL;
+    memset(&msg->addr, 0x0, sizeof(ip_addr_t));
+  } else {
+    /* address was resolved */
+    msg->err = ERR_OK;
+    msg->addr = *ipaddr;
+  }
+}
+
+/**
+ * Execute a DNS query non-blocking mode
+ * Called from netconn_gethostbyname
+ *
+ * @param arg the dns_api_msg pointing to the query
+ */
+err_t
+lwip_netconn_do_gethostbyname_nb(struct tcpip_api_call_data* call)
+{
+  struct dns_api_msg_nb *msg = (struct dns_api_msg_nb *)call;
+  u8_t addrtype =
+#if LWIP_IPV4 && LWIP_IPV6
+    msg->dns_addrtype;
+#else
+    LWIP_DNS_ADDRTYPE_DEFAULT;
+#endif
+
+  msg->err = dns_gethostbyname_addrtype(msg->name, &msg->addr, lwip_netconn_do_dns_found_nb, msg, addrtype);
+  return ERR_OK;
+}
+
+err_t
+lwip_netconn_check_gethostbyname_nb(struct tcpip_api_call_data* call)
+{
+  struct dns_api_msg_nb *msg = (struct dns_api_msg_nb *)call;
+  return msg->err;
 }
 #endif /* LWIP_DNS */
 

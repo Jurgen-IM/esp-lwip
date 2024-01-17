@@ -256,7 +256,7 @@ tcp_pbuf_prealloc(pbuf_layer layer, u16_t length, u16_t max_length,
          (!first_seg ||
           pcb->unsent != NULL ||
           pcb->unacked != NULL))) {
-      alloc = LWIP_MIN(max_length, LWIP_MEM_ALIGN_SIZE(TCP_OVERSIZE_CALC_LENGTH(length)));
+      alloc = LWIP_MIN(max_length, LWIP_MEM_ALIGN_SIZE(TCP_OVERSIZE_CALC_LENGTH(length, pcb)));
     }
   }
 #endif /* LWIP_NETIF_TX_SINGLE_PBUF */
@@ -330,9 +330,9 @@ tcp_write_checks(struct tcp_pcb *pcb, u16_t len)
   /* If total number of pbufs on the unsent/unacked queues exceeds the
    * configured maximum, return an error */
   /* check for configured max queuelen and possible overflow */
-  if (pcb->snd_queuelen >= LWIP_MIN(TCP_SND_QUEUELEN, (TCP_SNDQUEUELEN_OVERFLOW + 1))) {
+ if (pcb->snd_queuelen >= LWIP_MIN(TCP_SND_QUEUELEN(pcb), (TCP_SNDQUEUELEN_OVERFLOW + 1))) {
     LWIP_DEBUGF(TCP_OUTPUT_DEBUG | LWIP_DBG_LEVEL_SEVERE, ("tcp_write: too long queue %"U16_F" (max %"U16_F")\n",
-                pcb->snd_queuelen, (u16_t)TCP_SND_QUEUELEN));
+                pcb->snd_queuelen, (u16_t)TCP_SND_QUEUELEN(pcb)));
     TCP_STATS_INC(tcp.memerr);
     tcp_set_flags(pcb, TF_NAGLEMEMERR);
     return ERR_MEM;
@@ -656,9 +656,9 @@ tcp_write(struct tcp_pcb *pcb, const void *arg, u16_t len, u8_t apiflags)
     /* Now that there are more segments queued, we check again if the
      * length of the queue exceeds the configured maximum or
      * overflows. */
-    if (queuelen > LWIP_MIN(TCP_SND_QUEUELEN, TCP_SNDQUEUELEN_OVERFLOW)) {
+    if (queuelen > LWIP_MIN(TCP_SND_QUEUELEN(pcb), TCP_SNDQUEUELEN_OVERFLOW)) {
       LWIP_DEBUGF(TCP_OUTPUT_DEBUG | LWIP_DBG_LEVEL_SERIOUS, ("tcp_write: queue too long %"U16_F" (%d)\n",
-                  queuelen, (int)TCP_SND_QUEUELEN));
+                  queuelen, (int)TCP_SND_QUEUELEN(pcb)));
       pbuf_free(p);
       goto memerr;
     }
@@ -1497,9 +1497,9 @@ tcp_output_segment(struct tcp_seg *seg, struct tcp_pcb *pcb, struct netif *netif
   if (seg->flags & TF_SEG_OPTS_MSS) {
     u16_t mss;
 #if TCP_CALCULATE_EFF_SEND_MSS
-    mss = tcp_eff_send_mss_netif(TCP_MSS, netif, &pcb->remote_ip);
+    mss = tcp_eff_send_mss_netif(pcb->cfg_mss, netif, &pcb->remote_ip);
 #else /* TCP_CALCULATE_EFF_SEND_MSS */
-    mss = TCP_MSS;
+    mss = pcb->cfg_mss;
 #endif /* TCP_CALCULATE_EFF_SEND_MSS */
     *opts = TCP_BUILD_MSS_OPTION(mss);
     opts += 1;
@@ -1990,10 +1990,12 @@ tcp_rst(const struct tcp_pcb *pcb, u32_t seqno, u32_t ackno,
 
   optlen = LWIP_TCP_OPT_LENGTH_SEGMENT(0, pcb);
 
+  tcpwnd_size_t cfg_wnd = (pcb==NULL) ? TCP_WND : pcb->cfg_wnd;
+
 #if LWIP_WND_SCALE
-  wnd = PP_HTONS(((TCP_WND >> TCP_RCV_SCALE) & 0xFFFF));
+  wnd = PP_HTONS(((cfg_wnd >> TCP_RCV_SCALE) & 0xFFFF));
 #else
-  wnd = PP_HTONS(TCP_WND);
+  wnd = PP_HTONS(cfg_wnd);
 #endif
 
   p = tcp_output_alloc_header_common(ackno, optlen, 0, lwip_htonl(seqno), local_port,

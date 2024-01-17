@@ -431,4 +431,35 @@ lwip_getaddrinfo(const char *nodename, const char *servname,
   return 0;
 }
 
+int lwip_dns_resolve_start(const char *name, u8_t dns_addrtype, void **ctx)
+{
+#if LWIP_IPV4 && LWIP_IPV6
+      /* AF_UNSPEC: prefer IPv4 */
+      u8_t type = NETCONN_DNS_IPV4_IPV6;//NETCONN_DNS_IPV4_IPV6;
+      if (dns_addrtype == AF_INET) {
+    	  type = NETCONN_DNS_IPV4;
+      } else if (dns_addrtype == AF_INET6) {
+    	  type = LWIP_DNS_ADDRTYPE_IPV6;
+//#if ESP_LWIP
+//        if (hints->ai_flags & AI_V4MAPPED) {
+//          type = NETCONN_DNS_IPV6_IPV4;
+//        }
+//#endif /* ESP_LWIP */
+      }
+#endif /* LWIP_IPV4 && LWIP_IPV6 */
+	return netconn_gethostbyname_addrtype_start(name, type,ctx);
+}
+
+int lwip_dns_resolve_check(ip_addr_t *addr, void *ctx)
+{
+	int ret = netconn_gethostbyname_addrtype_check(addr, ctx);
+	if(ret == ERR_INPROGRESS){
+		return IN_PROGRESS;
+	}else if(ret == ERR_OK){
+		return HOST_FOUND;
+	}else if(ret == ERR_MEM){
+		return TRY_AGAIN;
+	}
+	return HOST_NOT_FOUND;
+}
 #endif /* LWIP_DNS && LWIP_SOCKET */

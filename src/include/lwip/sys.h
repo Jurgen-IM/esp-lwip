@@ -243,6 +243,7 @@ int sys_sem_signal_isr(sys_sem_t *sem);
  * @return SYS_ARCH_TIMEOUT on timeout, any other value on success
  */
 u32_t sys_arch_sem_wait(sys_sem_t *sem, u32_t timeout);
+u32_t sys_arch_sem_check(sys_sem_t *sem);								 
 /**
  * @ingroup sys_sem
  * Deallocates a semaphore.
@@ -251,6 +252,7 @@ u32_t sys_arch_sem_wait(sys_sem_t *sem, u32_t timeout);
 void sys_sem_free(sys_sem_t *sem);
 /** Wait for a semaphore - forever/no timeout */
 #define sys_sem_wait(sem)                  sys_arch_sem_wait(sem, 0)
+#define sys_sem_check(sem)                 sys_arch_sem_check(sem)									  
 #ifndef sys_sem_valid
 /**
  * @ingroup sys_sem

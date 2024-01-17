@@ -43,8 +43,6 @@
 #include LWIP_SNMPV3_INCLUDE_ENGINE
 #endif
 
-#define SNMP_MAX_TIME_BOOT 2147483647UL
-
 /** Call this if engine has been changed. Has to reset boots, see below */
 void
 snmpv3_engine_id_changed(void)

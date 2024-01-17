@@ -128,7 +128,7 @@
  * Indirectly this also limits the maximum depth of SNMP tree.
  */
 #if !defined SNMP_MAX_OBJ_ID_LEN || defined __DOXYGEN__
-#define SNMP_MAX_OBJ_ID_LEN             50
+#define SNMP_MAX_OBJ_ID_LEN             32
 #endif
 
 #if !defined SNMP_MAX_VALUE_SIZE || defined __DOXYGEN__
@@ -178,26 +178,28 @@
  * The OID identifiying the device. This may be the enterprise OID itself or any OID located below it in tree.
  */
 #if !defined SNMP_DEVICE_ENTERPRISE_OID || defined __DOXYGEN__
-#define SNMP_LWIP_ENTERPRISE_OID 26381
-/**
- * IANA assigned enterprise ID for lwIP is 26381
- * @see http://www.iana.org/assignments/enterprise-numbers
- *
- * @note this enterprise ID is assigned to the lwIP project,
- * all object identifiers living under this ID are assigned
- * by the lwIP maintainers!
- * @note don't change this define, use snmp_set_device_enterprise_oid()
- *
- * If you need to create your own private MIB you'll need
- * to apply for your own enterprise ID with IANA:
- * http://www.iana.org/numbers.html
- */
-#define SNMP_DEVICE_ENTERPRISE_OID {1, 3, 6, 1, 4, 1, SNMP_LWIP_ENTERPRISE_OID}
-/**
- * Length of SNMP_DEVICE_ENTERPRISE_OID
- */
-#define SNMP_DEVICE_ENTERPRISE_OID_LEN 7
+#define SNMP_LWIP_ENTERPRISE_OID 	43672
+
+#if defined CONFIG_IML_DEVICE_TYPE_INODE_MINI_D
+#define SNMP_LWIP_DEVICE_OID 		(CONFIG_SNMP_LWIP_DEVICE_OID)
+#elif  defined CONFIG_IML_DEVICE_TYPE_INODE_MINI_R
+#define SNMP_LWIP_DEVICE_OID 		(CONFIG_SNMP_LWIP_DEVICE_OID+1)
+#elif  defined CONFIG_IML_DEVICE_TYPE_INODE_SENSE
+#define SNMP_LWIP_DEVICE_OID 		(CONFIG_SNMP_LWIP_DEVICE_OID+2)
+#elif  defined CONFIG_IML_DEVICE_TYPE_INODE_RELAY
+#define SNMP_LWIP_DEVICE_OID 		(CONFIG_SNMP_LWIP_DEVICE_OID+3)
+#elif  defined CONFIG_IML_DEVICE_TYPE_INODE_IEC
+#define SNMP_LWIP_DEVICE_OID 		(CONFIG_SNMP_LWIP_DEVICE_OID+4)
 #endif
+
+#define SNMP_DEVICE_ENTERPRISE_OID 			{1, 3, 6, 1, 4, 1, SNMP_LWIP_ENTERPRISE_OID, 1, SNMP_LWIP_DEVICE_OID}
+#define SNMP_DEVICE_ENTERPRISE_OID_LEN 9
+
+#define SNMP_DEVICE_ENTERPRISE_TRAPS_OID 	{1, 3, 6, 1, 4, 1, SNMP_LWIP_ENTERPRISE_OID, 1, SNMP_LWIP_DEVICE_OID, 10}
+#define SNMP_DEVICE_ENTERPRISE_TRAPS_OID_LEN 10
+
+#endif
+
 
 /**
  * SNMP_DEBUG: Enable debugging for SNMP messages.
@@ -224,7 +226,7 @@
  * Value return for sysDesc field of MIB2.
  */
 #if !defined SNMP_LWIP_MIB2_SYSDESC || defined __DOXYGEN__
-#define SNMP_LWIP_MIB2_SYSDESC              "lwIP"
+#define SNMP_LWIP_MIB2_SYSDESC              ""
 #endif
 
 /**
@@ -232,7 +234,7 @@
  * To make sysName field settable, call snmp_mib2_set_sysname() to provide the necessary buffers.
  */
 #if !defined SNMP_LWIP_MIB2_SYSNAME || defined __DOXYGEN__
-#define SNMP_LWIP_MIB2_SYSNAME              "FQDN-unk"
+#define SNMP_LWIP_MIB2_SYSNAME              ""
 #endif
 
 /**
@@ -260,7 +262,7 @@
  * repetitions could block the thread for a longer time. Setting limit here will keep the stack more responsive.
  */
 #if !defined SNMP_LWIP_GETBULK_MAX_REPETITIONS || defined __DOXYGEN__
-#define SNMP_LWIP_GETBULK_MAX_REPETITIONS 0
+#define SNMP_LWIP_GETBULK_MAX_REPETITIONS 10
 #endif
 
 /**
@@ -283,7 +285,7 @@
 #endif
 
 #ifndef LWIP_SNMP_V3_MBEDTLS
-#define LWIP_SNMP_V3_MBEDTLS       LWIP_SNMP_V3
+#define LWIP_SNMP_V3_MBEDTLS      LWIP_SNMP_V3
 #endif
 
 #ifndef LWIP_SNMP_V3_CRYPTO
@@ -291,7 +293,7 @@
 #endif
 
 #ifndef LWIP_SNMP_CONFIGURE_VERSIONS
-#define LWIP_SNMP_CONFIGURE_VERSIONS 0
+#define LWIP_SNMP_CONFIGURE_VERSIONS 1
 #endif
 
 #endif /* LWIP_HDR_SNMP_OPTS_H */

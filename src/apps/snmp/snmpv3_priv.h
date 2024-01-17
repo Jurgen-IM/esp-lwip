@@ -46,17 +46,28 @@
 #define SNMP_V3_MAX_ENGINE_ID_LENGTH  32
 #define SNMP_V3_MAX_USER_LENGTH       32
 
-#define SNMP_V3_MAX_AUTH_PARAM_LENGTH  12
+#define SNMP_V3_MAX_AUTH_PARAM_MD5_LENGTH  		12
+#define SNMP_V3_MAX_AUTH_PARAM_SHA_LENGTH  		12
+#define SNMP_V3_MAX_AUTH_PARAM_SHA256_LENGTH  	24
+#define SNMP_V3_MAX_AUTH_PARAM_SHA512_LENGTH  	48
+#define SNMP_V3_MAX_AUTH_PARAM_LENGTH			SNMP_V3_MAX_AUTH_PARAM_SHA512_LENGTH
 #define SNMP_V3_MAX_PRIV_PARAM_LENGTH  8
 
-#define SNMP_V3_MD5_LEN        16
-#define SNMP_V3_SHA_LEN        20
+//#define SNMP_V3_DES_CRYPTO_KEY_LEN  8
+//#define SNMP_V3_AES_CRYPTO_KEY_LEN  16
 
+#define SNMP_V3_MD5_LEN        		16
+#define SNMP_V3_SHA_LEN        		20
+#define SNMP_V3_SHA256_LEN        	32
+#define SNMP_V3_SHA512_LEN        	64
+
+#define SNMP_V3_LOCALIZED_PASSWORD_KEY_LEN        	64
 typedef enum {
   SNMP_V3_PRIV_MODE_DECRYPT = 0,
   SNMP_V3_PRIV_MODE_ENCRYPT = 1
 } snmpv3_priv_mode_t;
 
+int snmpv3_get_auth_param_len(snmpv3_auth_algo_t auth);								   
 s32_t snmpv3_get_engine_boots_internal(void);
 err_t snmpv3_auth(struct snmp_pbuf_stream *stream, u16_t length, const u8_t *key, snmpv3_auth_algo_t algo, u8_t *hmac_out);
 err_t snmpv3_crypt(struct snmp_pbuf_stream *stream, u16_t length, const u8_t *key,

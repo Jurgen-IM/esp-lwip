@@ -17,10 +17,14 @@ extern "C" {
 extern const struct snmp_obj_id usmNoAuthProtocol;
 extern const struct snmp_obj_id usmHMACMD5AuthProtocol;
 extern const struct snmp_obj_id usmHMACSHAAuthProtocol;
+extern const struct snmp_obj_id usmHMACSHA256AuthProtocol;
+extern const struct snmp_obj_id usmHMACSHA512AuthProtocol;
 
 extern const struct snmp_obj_id usmNoPrivProtocol;
 extern const struct snmp_obj_id usmDESPrivProtocol;
 extern const struct snmp_obj_id usmAESPrivProtocol;
+extern const struct snmp_obj_id usmAES192PrivProtocol;
+extern const struct snmp_obj_id usmAES256PrivProtocol;
 
 extern const struct snmp_mib snmpframeworkmib;
 

@@ -55,22 +55,16 @@
 
 #include <string.h>
 
-#define SNMP_V3_AUTH_FLAG      0x01
-#define SNMP_V3_PRIV_FLAG      0x02
-
-/* Security levels */
-#define SNMP_V3_NOAUTHNOPRIV   0x00
-#define SNMP_V3_AUTHNOPRIV     SNMP_V3_AUTH_FLAG
-#define SNMP_V3_AUTHPRIV       (SNMP_V3_AUTH_FLAG | SNMP_V3_PRIV_FLAG)
-
 /* public (non-static) constants */
 /** SNMP community string */
-const char *snmp_community = SNMP_COMMUNITY;
+char snmp_community[SNMP_MAX_COMMUNITY_STR_LEN+1] = SNMP_COMMUNITY;
 /** SNMP community string for write access */
-const char *snmp_community_write = SNMP_COMMUNITY_WRITE;
+char snmp_community_write[SNMP_MAX_COMMUNITY_STR_LEN+1] = SNMP_COMMUNITY_WRITE;
 /** SNMP community string for sending traps */
-const char *snmp_community_trap = SNMP_COMMUNITY_TRAP;
+char snmp_community_trap[SNMP_MAX_COMMUNITY_STR_LEN+1] = SNMP_COMMUNITY_TRAP;
 
+ip_addr_t snmp_trusted_ip[SNMP_MAX_TRUSTED_ADDRESSES];
+ip_addr_t snmp_traps_ip[SNMP_TRAP_DESTINATIONS];
 snmp_write_callback_fct snmp_write_callback     = NULL;
 void                   *snmp_write_callback_arg = NULL;
 
@@ -79,6 +73,8 @@ void                   *snmp_write_callback_arg = NULL;
 static u8_t v1_enabled = 1;
 static u8_t v2c_enabled = 1;
 static u8_t v3_enabled = 1;
+static u8_t snmp_traps_version = SNMP_VERSION_NONE;
+static u8_t snmp_trap_send_if = 0;					   
 
 static u8_t
 snmp_version_enabled(u8_t version)
@@ -153,8 +149,31 @@ snmp_v3_enable(u8_t enable)
   snmp_version_enable(SNMP_VERSION_3, enable);
 }
 
+u8_t snmp_trap_version_get(void)
+{
+	return snmp_traps_version;
+}
+
+void snmp_trap_version_set(u8_t version)
+{
+	LWIP_ASSERT_CORE_LOCKED();
+	if(version == SNMP_VERSION_1 || version == SNMP_VERSION_2c || version== SNMP_VERSION_3)
+		snmp_traps_version = version;
+	else
+		snmp_traps_version = SNMP_VERSION_NONE;
+}
 #endif
 
+u8_t snmp_trap_send_if_get(void)
+{
+	LWIP_ASSERT_CORE_LOCKED();
+	return snmp_trap_send_if;
+}
+void snmp_trap_send_if_set(u8_t sendIf)
+{
+	LWIP_ASSERT_CORE_LOCKED();
+	snmp_trap_send_if = sendIf;
+}
 /**
  * @ingroup snmp_core
  * Returns current SNMP community string.
@@ -179,7 +198,8 @@ snmp_set_community(const char *const community)
 {
   LWIP_ASSERT_CORE_LOCKED();
   LWIP_ASSERT("community string is too long!", strlen(community) <= SNMP_MAX_COMMUNITY_STR_LEN);
-  snmp_community = community;
+  strncpy(snmp_community,community,SNMP_MAX_COMMUNITY_STR_LEN);
+  snmp_community[SNMP_MAX_COMMUNITY_STR_LEN]='\0';									  
 }
 
 /**
@@ -218,7 +238,8 @@ snmp_set_community_write(const char *const community)
   LWIP_ASSERT_CORE_LOCKED();
   LWIP_ASSERT("community string must not be NULL", community != NULL);
   LWIP_ASSERT("community string is too long!", strlen(community) <= SNMP_MAX_COMMUNITY_STR_LEN);
-  snmp_community_write = community;
+  strncpy(snmp_community_write,community,SNMP_MAX_COMMUNITY_STR_LEN);
+  snmp_community_write[SNMP_MAX_COMMUNITY_STR_LEN]='\0';											
 }
 
 /**
@@ -234,9 +255,58 @@ snmp_set_community_trap(const char *const community)
 {
   LWIP_ASSERT_CORE_LOCKED();
   LWIP_ASSERT("community string is too long!", strlen(community) <= SNMP_MAX_COMMUNITY_STR_LEN);
-  snmp_community_trap = community;
+  strncpy(snmp_community_trap,community,SNMP_MAX_COMMUNITY_STR_LEN);
+  snmp_community_trap[SNMP_MAX_COMMUNITY_STR_LEN]='\0';											   
 }
 
+void snmp_set_trusted_address (uint8_t indx, const ip_addr_t *ip)
+{
+  LWIP_ASSERT_CORE_LOCKED();
+  if(indx>=SNMP_MAX_TRUSTED_ADDRESSES)
+	  return;
+  ip_addr_copy(snmp_trusted_ip[indx], *ip);
+}
+
+const ip_addr_t*  snmp_get_trusted_address (uint8_t indx)
+{
+  LWIP_ASSERT_CORE_LOCKED();
+  if(indx>=SNMP_MAX_TRUSTED_ADDRESSES)
+  {
+	  return NULL;
+  }
+  return (&snmp_trusted_ip[indx]);
+}
+
+
+static int snmp_check_trusted_address (const ip_addr_t *ip)
+{
+	for(int i=0;i<SNMP_MAX_TRUSTED_ADDRESSES;i++)
+	{
+		if(IP_IS_V4(&snmp_trusted_ip[i]) && ip_addr_get_ip4_u32(&snmp_trusted_ip[i])==0xffffffff)
+			return 0;
+		if(IP_IS_V4(&snmp_trusted_ip[i]) && ip_addr_cmp(&snmp_trusted_ip[i], ip) && !ip_addr_isany(ip))
+			return 0;
+	}
+	return (-1);
+}
+
+void snmp_set_trap_address (uint8_t indx, const ip_addr_t *ip)
+{
+  LWIP_ASSERT_CORE_LOCKED();
+  if(indx>=SNMP_TRAP_DESTINATIONS)
+	  return;
+  ip_addr_copy(snmp_traps_ip[indx], *ip);
+}
+
+const ip_addr_t*  snmp_get_trap_address (uint8_t indx)
+{
+  LWIP_ASSERT_CORE_LOCKED();
+  if(indx>=SNMP_TRAP_DESTINATIONS)
+  {
+	  return NULL;
+  }
+  return (&snmp_traps_ip[indx]);
+}
 /**
  * @ingroup snmp_core
  * Callback fired on every successful write access
@@ -267,13 +337,16 @@ static void snmp_execute_write_callbacks(struct snmp_request *request);
 /* ----------------------------------------------------------------------- */
 /* implementation */
 /* ----------------------------------------------------------------------- */
-
 void
 snmp_receive(void *handle, struct pbuf *p, const ip_addr_t *source_ip, u16_t port)
 {
   err_t err;
   struct snmp_request request;
 
+  if(snmp_check_trusted_address(source_ip))
+  {
+	  return;
+  }
   memset(&request, 0, sizeof(request));
   request.handle       = handle;
   request.source_ip    = source_ip;
@@ -754,6 +827,22 @@ snmp_process_set_request(struct snmp_request *request)
 #define IF_PARSE_EXEC(code)   PARSE_EXEC(code, ERR_ARG)
 #define IF_PARSE_ASSERT(code) PARSE_ASSERT(code, ERR_ARG)
 
+int snmpv3_get_auth_param_len(snmpv3_auth_algo_t auth)
+{
+    switch(auth)
+    {
+    	  default:
+		  case SNMP_V3_AUTH_ALGO_MD5:
+			  return SNMP_V3_MAX_AUTH_PARAM_MD5_LENGTH;
+		  case SNMP_V3_AUTH_ALGO_SHA:
+			  return SNMP_V3_MAX_AUTH_PARAM_SHA_LENGTH;
+		  case SNMP_V3_AUTH_ALGO_SHA256:
+			  return SNMP_V3_MAX_AUTH_PARAM_SHA256_LENGTH;
+		  case SNMP_V3_AUTH_ALGO_SHA512:
+			  return SNMP_V3_MAX_AUTH_PARAM_SHA512_LENGTH;
+    }
+    return SNMP_V3_MAX_AUTH_PARAM_LENGTH;
+}
 /**
  * Checks and decodes incoming SNMP message header, logs header errors.
  *
@@ -789,7 +878,6 @@ snmp_parse_inbound_frame(struct snmp_request *request)
   IF_PARSE_ASSERT(parent_tlv_value_len > 0);
 
   IF_PARSE_EXEC(snmp_asn1_dec_s32t(&pbuf_stream, tlv.value_len, &s32_value));
-
   if (((s32_value != SNMP_VERSION_1) &&
        (s32_value != SNMP_VERSION_2c)
 #if LWIP_SNMP_V3
@@ -805,7 +893,6 @@ snmp_parse_inbound_frame(struct snmp_request *request)
     return ERR_ARG;
   }
   request->version = (u8_t)s32_value;
-
 #if LWIP_SNMP_V3
   if (request->version == SNMP_VERSION_3) {
     u16_t u16_value;
@@ -1009,8 +1096,8 @@ snmp_parse_inbound_frame(struct snmp_request *request)
 #if LWIP_SNMP_V3_CRYPTO
     if (request->msg_flags & SNMP_V3_AUTH_FLAG) {
       const u8_t zero_arr[SNMP_V3_MAX_AUTH_PARAM_LENGTH] = { 0 };
-      u8_t key[20];
-      u8_t hmac[LWIP_MAX(SNMP_V3_SHA_LEN, SNMP_V3_MD5_LEN)];
+      u8_t *key;
+      u8_t hmac[SNMP_V3_LOCALIZED_PASSWORD_KEY_LEN];
       struct snmp_pbuf_stream auth_stream;
 
       if (request->msg_authentication_parameters_len > SNMP_V3_MAX_AUTH_PARAM_LENGTH) {
@@ -1029,15 +1116,18 @@ snmp_parse_inbound_frame(struct snmp_request *request)
       /* Verify authentication */
       IF_PARSE_EXEC(snmp_pbuf_stream_init(&auth_stream, request->inbound_pbuf, 0, request->inbound_pbuf->tot_len));
 
-      IF_PARSE_EXEC(snmpv3_get_user((char *)request->msg_user_name, &auth, key, NULL, NULL));
+      IF_PARSE_EXEC(snmpv3_get_user((char *)request->msg_user_name, &auth, &key, NULL, NULL));
       IF_PARSE_EXEC(snmpv3_auth(&auth_stream, request->inbound_pbuf->tot_len, key, auth, hmac));
 
-      if (memcmp(request->msg_authentication_parameters, hmac, SNMP_V3_MAX_AUTH_PARAM_LENGTH)) {
+      int authparamLen = snmpv3_get_auth_param_len(auth);
+
+      if (memcmp(request->msg_authentication_parameters, hmac, authparamLen)) {
         snmp_stats.wrongdigests++;
         request->msg_flags = SNMP_V3_NOAUTHNOPRIV;
         request->error_status = SNMP_ERR_AUTHORIZATIONERROR;
         return ERR_OK;
       }
+      request->msg_authentication_parameters_len = authparamLen;
 
       /* 7) if securitylevel specifies authentication, verify engineboots, enginetime and lastenginetime */
       {
@@ -1073,14 +1163,14 @@ snmp_parse_inbound_frame(struct snmp_request *request)
     if (request->msg_flags & SNMP_V3_PRIV_FLAG) {
       /* Decrypt message */
 
-      u8_t key[20];
+      u8_t *key;
 
       IF_PARSE_EXEC(snmp_asn1_dec_tlv(&pbuf_stream, &tlv));
       IF_PARSE_ASSERT(tlv.type == SNMP_ASN1_TYPE_OCTET_STRING);
       parent_tlv_value_len -= SNMP_ASN1_TLV_HDR_LENGTH(tlv);
       IF_PARSE_ASSERT(parent_tlv_value_len > 0);
 
-      IF_PARSE_EXEC(snmpv3_get_user((char *)request->msg_user_name, NULL, NULL, &priv, key));
+      IF_PARSE_EXEC(snmpv3_get_user((char *)request->msg_user_name, NULL, NULL, &priv, &key));
       if (snmpv3_crypt(&pbuf_stream, tlv.value_len, key,
                        request->msg_privacy_parameters, request->msg_authoritative_engine_boots,
                        request->msg_authoritative_engine_time, priv, SNMP_V3_PRIV_MODE_DECRYPT) != ERR_OK) {
@@ -1369,11 +1459,11 @@ snmp_prepare_outbound_frame(struct snmp_request *request)
 #if LWIP_SNMP_V3_CRYPTO
     /* msgAuthenticationParameters */
     if (request->msg_flags & SNMP_V3_AUTH_FLAG) {
-      memset(request->msg_authentication_parameters, 0, SNMP_V3_MAX_AUTH_PARAM_LENGTH);
+      memset(request->msg_authentication_parameters, 0, request->msg_authentication_parameters_len);
       request->outbound_msg_authentication_parameters_offset = pbuf_stream->offset;
-      SNMP_ASN1_SET_TLV_PARAMS(tlv, SNMP_ASN1_TYPE_OCTET_STRING, 1, SNMP_V3_MAX_AUTH_PARAM_LENGTH);
+      SNMP_ASN1_SET_TLV_PARAMS(tlv, SNMP_ASN1_TYPE_OCTET_STRING, 1, request->msg_authentication_parameters_len);
       OF_BUILD_EXEC(snmp_ans1_enc_tlv(pbuf_stream, &tlv));
-      OF_BUILD_EXEC(snmp_asn1_enc_raw(pbuf_stream, request->msg_authentication_parameters, SNMP_V3_MAX_AUTH_PARAM_LENGTH));
+      OF_BUILD_EXEC(snmp_asn1_enc_raw(pbuf_stream, request->msg_authentication_parameters, request->msg_authentication_parameters_len));
     } else
 #endif
     {
@@ -1475,10 +1565,17 @@ snmp_varbind_length(struct snmp_varbind *varbind, struct snmp_varbind_len *len)
   } else {
     switch (varbind->type) {
       case SNMP_ASN1_TYPE_INTEGER:
-        if (varbind->value_len != sizeof (s32_t)) {
-          return ERR_VAL;
+        if (varbind->value_len == sizeof (s32_t)) {
+        	 snmp_asn1_enc_s32t_cnt(*((s32_t *) varbind->value), &len->value_value_len);
         }
-        snmp_asn1_enc_s32t_cnt(*((s32_t *) varbind->value), &len->value_value_len);
+        else if((varbind->value_len == sizeof (s16_t))){
+        	snmp_asn1_enc_s32t_cnt((s32_t)(*((s16_t *) varbind->value)), &len->value_value_len);
+		}
+		else if((varbind->value_len == sizeof (s8_t))){
+        	snmp_asn1_enc_s32t_cnt((s32_t)(*((s8_t *) varbind->value)), &len->value_value_len);
+		}
+		else
+			return ERR_VAL;
         break;
       case SNMP_ASN1_TYPE_COUNTER:
       case SNMP_ASN1_TYPE_GAUGE:
@@ -1567,7 +1664,17 @@ snmp_append_outbound_varbind(struct snmp_pbuf_stream *pbuf_stream, struct snmp_v
     } else {
       switch (varbind->type) {
         case SNMP_ASN1_TYPE_INTEGER:
-          OVB_BUILD_EXEC(snmp_asn1_enc_s32t(pbuf_stream, len.value_value_len, *((s32_t *) varbind->value)));
+        	if(varbind->value_len == sizeof(s8_t)){
+        		OVB_BUILD_EXEC(snmp_asn1_enc_s32t(pbuf_stream, len.value_value_len, (s32_t)(*((s8_t *) varbind->value))));
+        	}
+        	else if(varbind->value_len == sizeof(s16_t)){
+        		OVB_BUILD_EXEC(snmp_asn1_enc_s32t(pbuf_stream, len.value_value_len, (s32_t)(*((s16_t *) varbind->value))));
+        	}
+        	else if(varbind->value_len == sizeof(s32_t)){
+        		OVB_BUILD_EXEC(snmp_asn1_enc_s32t(pbuf_stream, len.value_value_len, (s32_t)(*((s32_t *) varbind->value))));
+        	}
+        	else
+        		return ERR_ARG;
           break;
         case SNMP_ASN1_TYPE_COUNTER:
         case SNMP_ASN1_TYPE_GAUGE:
@@ -1675,7 +1782,13 @@ snmp_complete_outbound_frame(struct snmp_request *request)
   /* Calculate padding for encryption */
   if (request->version == SNMP_VERSION_3 && (request->msg_flags & SNMP_V3_PRIV_FLAG)) {
     u8_t i;
-    outbound_padding = (8 - (u8_t)((frame_size - request->outbound_scoped_pdu_seq_offset) & 0x07)) & 0x07;
+    snmpv3_priv_algo_t algo;
+    OF_BUILD_EXEC(snmpv3_get_user((char *)request->msg_user_name, NULL, NULL, &algo, NULL));
+    if(algo==SNMP_V3_PRIV_ALGO_DES){
+    	outbound_padding = (8 - (u8_t)((frame_size - request->outbound_scoped_pdu_seq_offset) & 0x07)) & 0x07;
+    }else{
+    	outbound_padding = (16 - (u8_t)((frame_size - request->outbound_scoped_pdu_seq_offset) & 0x0F)) & 0x0F;
+    }
     for (i = 0; i < outbound_padding; i++) {
       OF_BUILD_EXEC( snmp_pbuf_stream_write(&request->outbound_pbuf_stream, 0) );
     }
@@ -1783,7 +1896,7 @@ snmp_complete_outbound_frame(struct snmp_request *request)
 #if LWIP_SNMP_V3 && LWIP_SNMP_V3_CRYPTO
   /* Encrypt response */
   if (request->version == SNMP_VERSION_3 && (request->msg_flags & SNMP_V3_PRIV_FLAG)) {
-    u8_t key[20];
+    u8_t *key;
     snmpv3_priv_algo_t algo;
 
     /* complete missing length in PDU sequence */
@@ -1793,7 +1906,7 @@ snmp_complete_outbound_frame(struct snmp_request *request)
                              - request->outbound_scoped_pdu_string_offset - 1 - 3);
     OF_BUILD_EXEC(snmp_ans1_enc_tlv(&(request->outbound_pbuf_stream), &tlv));
 
-    OF_BUILD_EXEC(snmpv3_get_user((char *)request->msg_user_name, NULL, NULL, &algo, key));
+    OF_BUILD_EXEC(snmpv3_get_user((char *)request->msg_user_name, NULL, NULL, &algo, &key));
 
     OF_BUILD_EXEC(snmpv3_crypt(&request->outbound_pbuf_stream, tlv.value_len, key,
                                request->msg_privacy_parameters, request->msg_authoritative_engine_boots,
@@ -1801,25 +1914,24 @@ snmp_complete_outbound_frame(struct snmp_request *request)
   }
 
   if (request->version == SNMP_VERSION_3 && (request->msg_flags & SNMP_V3_AUTH_FLAG)) {
-    u8_t key[20];
+    u8_t *key;
     snmpv3_auth_algo_t algo;
-    u8_t hmac[20];
 
-    OF_BUILD_EXEC(snmpv3_get_user((char *)request->msg_user_name, &algo, key, NULL, NULL));
+    OF_BUILD_EXEC(snmpv3_get_user((char *)request->msg_user_name, &algo, &key, NULL, NULL));
     OF_BUILD_EXEC(snmp_pbuf_stream_init(&(request->outbound_pbuf_stream),
                                         request->outbound_pbuf, 0, request->outbound_pbuf->tot_len));
-    OF_BUILD_EXEC(snmpv3_auth(&request->outbound_pbuf_stream, frame_size + outbound_padding, key, algo, hmac));
+    OF_BUILD_EXEC(snmpv3_auth(&request->outbound_pbuf_stream, frame_size + outbound_padding, key, algo, request->msg_authentication_parameters));
 
-    MEMCPY(request->msg_authentication_parameters, hmac, SNMP_V3_MAX_AUTH_PARAM_LENGTH);
+    int authpParamLen=snmpv3_get_auth_param_len(algo);
     OF_BUILD_EXEC(snmp_pbuf_stream_init(&request->outbound_pbuf_stream,
                                         request->outbound_pbuf, 0, request->outbound_pbuf->tot_len));
     OF_BUILD_EXEC(snmp_pbuf_stream_seek_abs(&request->outbound_pbuf_stream,
                                             request->outbound_msg_authentication_parameters_offset));
 
-    SNMP_ASN1_SET_TLV_PARAMS(tlv, SNMP_ASN1_TYPE_OCTET_STRING, 1, SNMP_V3_MAX_AUTH_PARAM_LENGTH);
+    SNMP_ASN1_SET_TLV_PARAMS(tlv, SNMP_ASN1_TYPE_OCTET_STRING, 1, authpParamLen);
     OF_BUILD_EXEC(snmp_ans1_enc_tlv(&request->outbound_pbuf_stream, &tlv));
     OF_BUILD_EXEC(snmp_asn1_enc_raw(&request->outbound_pbuf_stream,
-                                    request->msg_authentication_parameters, SNMP_V3_MAX_AUTH_PARAM_LENGTH));
+                                    request->msg_authentication_parameters, authpParamLen));
   }
 #endif
 

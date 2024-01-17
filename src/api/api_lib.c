@@ -554,6 +554,9 @@ netconn_accept(struct netconn *conn, struct netconn **new_conn)
   API_MSG_VAR_FREE(msg);
 #endif /* TCP_LISTEN_BACKLOG */
 
+  if (netconn_is_nonblocking(conn))
+	  netconn_set_nonblocking(newconn, O_NONBLOCK);
+
   *new_conn = newconn;
   /* don't set conn->last_err: it's only ERR_OK, anyway */
   return ERR_OK;
@@ -781,6 +784,32 @@ handle_fin:
   return err;
 }
 
+static err_t
+netconn_get_errors_tcp(struct netconn *conn)
+{
+	if (!NETCONN_RECVMBOX_WAITABLE(conn)) {
+		/* This only happens when calling this function more than once *after* receiving FIN */
+		return ERR_CONN;
+	}
+	if (netconn_is_flag_set(conn, NETCONN_FIN_RX_PENDING)) {
+		netconn_clear_flags(conn, NETCONN_FIN_RX_PENDING);
+		API_EVENT(conn, NETCONN_EVT_RCVMINUS, 0);
+		if (conn->pcb.ip == NULL) {
+			/* race condition: RST during recv */
+			err_t err = netconn_err(conn);
+			if (err != ERR_OK) {
+				return err;
+			}
+			return ERR_RST;
+		}
+		/* RX side is closed, so deallocate the recvmbox */
+		netconn_close_shutdown(conn, NETCONN_SHUT_RD);
+		/* Don' store ERR_CLSD as conn->err since we are only half-closed */
+		return ERR_CLSD;
+	}
+	return ERR_OK;
+}
+
 /**
  * @ingroup netconn_tcp
  * Receive data (in form of a pbuf) from a TCP netconn
@@ -820,6 +849,13 @@ netconn_recv_tcp_pbuf_flags(struct netconn *conn, struct pbuf **new_buf, u8_t ap
 
   return netconn_recv_data_tcp(conn, new_buf, apiflags);
 }
+
+err_t
+netconn_get_errors(struct netconn *conn)
+{
+	return netconn_get_errors_tcp(conn);
+}
+
 #endif /* LWIP_TCP */
 
 /**
@@ -1352,6 +1388,72 @@ netconn_gethostbyname(const char *name, ip_addr_t *addr)
   API_VAR_FREE(MEMP_DNS_API_MSG, msg);
   return err;
 }
+
+#if LWIP_IPV4 && LWIP_IPV6
+err_t
+netconn_gethostbyname_addrtype_start(const char *name, u8_t dns_addrtype, void **ctx)
+#else
+err_t
+netconn_gethostbyname_start(const char *name, void **ctx)
+#endif
+{
+#if !LWIP_MPU_COMPATIBLE
+  struct dns_api_msg_nb *msg;
+#else
+  API_VAR_DECLARE(struct dns_api_msg_nb, msg);
+#endif /* LWIP_MPU_COMPATIBLE */
+
+  LWIP_ERROR("netconn_gethostbyname: invalid name", (name != NULL), return ERR_ARG;);
+#if LWIP_MPU_COMPATIBLE
+  if (strlen(name) >= DNS_MAX_NAME_LENGTH) {
+    return ERR_ARG;
+  }
+#endif
+
+#if LWIP_MPU_COMPATIBLE
+	API_VAR_ALLOC(struct dns_api_msg_nb, MEMP_DNS_API_MSG, msg, ERR_MEM);
+	strncpy(API_VAR_REF(msg).name, name, DNS_MAX_NAME_LENGTH - 1);
+	API_VAR_REF(msg).name[DNS_MAX_NAME_LENGTH - 1] = 0;
+#else /* LWIP_MPU_COMPATIBLE */
+	msg = mem_malloc(sizeof(struct dns_api_msg_nb));
+	if(msg == NULL){
+		return ERR_MEM;
+	}
+	msg->name = name;
+#endif /* LWIP_MPU_COMPATIBLE */
+	*ctx = msg;
+#if LWIP_IPV4 && LWIP_IPV6
+	msg->dns_addrtype = dns_addrtype;
+#endif /* LWIP_IPV4 && LWIP_IPV6 */
+  tcpip_api_call(lwip_netconn_do_gethostbyname_nb,  (struct tcpip_api_call_data *)msg);
+  return ERR_OK;
+}
+
+#if LWIP_IPV4 && LWIP_IPV6
+err_t
+netconn_gethostbyname_addrtype_check(ip_addr_t *addr, void *ctx)
+#else
+err_t
+netconn_gethostbyname_check(ip_addr_t *addr, void *ctx)
+#endif
+{
+  int cberr;
+  if(ctx == NULL)
+    return ERR_ARG;
+  struct dns_api_msg_nb *msg = ctx;
+  cberr = tcpip_api_call(lwip_netconn_check_gethostbyname_nb,  (struct tcpip_api_call_data *)msg);
+  if(addr)
+	  *addr = msg->addr;
+  if (cberr != ERR_INPROGRESS) {
+#if LWIP_MPU_COMPATIBLE
+    API_VAR_FREE(MEMP_DNS_API_MSG, msg);
+#else
+    mem_free(msg);
+#endif
+  }
+  return cberr;
+}
+
 #endif /* LWIP_DNS*/
 
 #if LWIP_NETCONN_SEM_PER_THREAD

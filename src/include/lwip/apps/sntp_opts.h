@@ -108,7 +108,7 @@
  *        server whose synchronization source has expired for a very long time.
  */
 #if !defined SNTP_CHECK_RESPONSE || defined __DOXYGEN__
-#define SNTP_CHECK_RESPONSE         0
+#define SNTP_CHECK_RESPONSE         1
 #endif
 
 /** Enable round-trip delay compensation.
@@ -153,7 +153,7 @@
  * to a function (including the brackets) and define SNTP_STARTUP_DELAY to 1.
  */
 #if !defined SNTP_STARTUP_DELAY_FUNC || defined __DOXYGEN__
-#define SNTP_STARTUP_DELAY_FUNC     (LWIP_RAND() % 5000)
+#define SNTP_STARTUP_DELAY_FUNC     (5000+(LWIP_RAND() % 1000))
 #endif
 
 /** SNTP receive timeout - in milliseconds
@@ -161,7 +161,7 @@
  * Default is 15 seconds. Must not be beolw 15 seconds by specification (i.e. 15000)
  */
 #if !defined SNTP_RECV_TIMEOUT || defined __DOXYGEN__
-#define SNTP_RECV_TIMEOUT           15000
+#define SNTP_RECV_TIMEOUT           8000
 #endif
 
 /** SNTP update delay - in milliseconds
@@ -191,7 +191,7 @@
 
 /** Maximum retry timeout (in milliseconds). */
 #if !defined SNTP_RETRY_TIMEOUT_MAX || defined __DOXYGEN__
-#define SNTP_RETRY_TIMEOUT_MAX      (SNTP_RETRY_TIMEOUT * 10)
+#define SNTP_RETRY_TIMEOUT_MAX      (SNTP_RETRY_TIMEOUT * 2)
 #endif
 
 /** Increase retry timeout with every retry sent

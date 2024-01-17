@@ -50,6 +50,12 @@ extern "C" {
 #include "lwip/err.h"
 #include "lwip/apps/snmp_core.h"
 
+/* version defines used in PDU */
+#define SNMP_VERSION_1  	0
+#define SNMP_VERSION_2c 	1
+#define SNMP_VERSION_3  	3
+#define SNMP_VERSION_NONE  	4
+
 /** SNMP variable binding descriptor (publically needed for traps) */
 struct snmp_varbind
 {
@@ -99,7 +105,7 @@ void snmp_trap_dst_ip_set(u8_t dst_idx, const ip_addr_t *dst);
 
 err_t snmp_send_trap_generic(s32_t generic_trap);
 err_t snmp_send_trap_specific(s32_t specific_trap, struct snmp_varbind *varbinds);
-err_t snmp_send_trap(const struct snmp_obj_id* oid, s32_t generic_trap, s32_t specific_trap, struct snmp_varbind *varbinds);
+err_t snmp_send_trap(const struct snmp_obj_id *eoid, s32_t generic_trap, s32_t specific_trap, struct snmp_varbind *varbinds);
 
 #define SNMP_AUTH_TRAPS_DISABLED 0
 #define SNMP_AUTH_TRAPS_ENABLED  1
@@ -112,6 +118,10 @@ u8_t snmp_v3_enabled(void);
 void snmp_v1_enable(u8_t enable);
 void snmp_v2c_enable(u8_t enable);
 void snmp_v3_enable(u8_t enable);
+u8_t snmp_trap_version_get(void);
+void snmp_trap_version_set(u8_t version);
+u8_t snmp_trap_send_if_get(void);
+void snmp_trap_send_if_set(u8_t sendIf);				
 
 const char * snmp_get_community(void);
 const char * snmp_get_community_write(void);
@@ -119,12 +129,17 @@ const char * snmp_get_community_trap(void);
 void snmp_set_community(const char * const community);
 void snmp_set_community_write(const char * const community);
 void snmp_set_community_trap(const char * const community);
-
-void snmp_coldstart_trap(void);
-void snmp_authfail_trap(void);
+void snmp_set_trusted_address (uint8_t indx, const ip_addr_t *ip);
+const ip_addr_t*  snmp_get_trusted_address (uint8_t indx);
+void snmp_set_trap_address (uint8_t indx, const ip_addr_t *ip);
+const ip_addr_t*  snmp_get_trap_address (uint8_t indx);  
 
 typedef void (*snmp_write_callback_fct)(const u32_t* oid, u8_t oid_len, void* callback_arg);
 void snmp_set_write_callback(snmp_write_callback_fct write_callback, void* callback_arg);
+
+void snmp_authfail_trap(void);
+
+void snmp_trap_check(int period_ms);
 
 #endif /* LWIP_SNMP */
 

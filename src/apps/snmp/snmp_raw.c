@@ -41,13 +41,12 @@
 #include "lwip/ip.h"
 #include "lwip/prot/iana.h"
 #include "snmp_msg.h"
-
+#include "esp_log.h"
 /* lwIP UDP receive callback function */
 static void
 snmp_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
   LWIP_UNUSED_ARG(arg);
-
   snmp_receive(pcb, p, addr, port);
 
   pbuf_free(p);
@@ -57,6 +56,12 @@ err_t
 snmp_sendto(void *handle, struct pbuf *p, const ip_addr_t *dst, u16_t port)
 {
   return udp_sendto((struct udp_pcb *)handle, p, dst, port);
+}
+
+err_t
+snmp_sendto_if(void *handle, struct pbuf *p, const ip_addr_t *dst, u16_t port, void* netif)
+{
+  return udp_sendto_if((struct udp_pcb *)handle, p, dst, port, (struct netif*)netif);
 }
 
 u8_t

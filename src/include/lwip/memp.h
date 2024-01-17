@@ -70,11 +70,17 @@ extern const struct memp_desc* const memp_pools[MEMP_MAX];
 
 #define LWIP_MEMPOOL_DECLARE(name,num,size,desc) \
   LWIP_MEMPOOL_DECLARE_STATS_INSTANCE(memp_stats_ ## name) \
+  \
+  static u16_t cnum_ ## name; \
+  \
   const struct memp_desc memp_ ## name = { \
     DECLARE_LWIP_MEMPOOL_DESC(desc) \
     LWIP_MEMPOOL_DECLARE_STATS_REFERENCE(memp_stats_ ## name) \
-    LWIP_MEM_ALIGN_SIZE(size) \
+    LWIP_MEM_ALIGN_SIZE(size), \
+    (num), \
+	&cnum_ ## name \
   };
+
 
 #else /* MEMP_MEM_MALLOC */
 

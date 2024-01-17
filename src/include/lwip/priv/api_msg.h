@@ -185,6 +185,24 @@ struct dns_api_msg {
   /** Errors are given back here */
   err_t API_MSG_M_DEF(err);
 };
+
+struct dns_api_msg_nb {
+  /** Hostname to query or dotted IP address string */
+#if LWIP_MPU_COMPATIBLE
+  char name[DNS_MAX_NAME_LENGTH];
+#else /* LWIP_MPU_COMPATIBLE */
+  const char *name;
+#endif /* LWIP_MPU_COMPATIBLE */
+  /** The resolved address is stored here */
+  ip_addr_t addr;
+#if LWIP_IPV4 && LWIP_IPV6
+  /** Type of resolve call */
+  u8_t dns_addrtype;
+#endif /* LWIP_IPV4 && LWIP_IPV6 */
+  /** Errors are given back here */
+  err_t err;
+};
+
 #endif /* LWIP_DNS */
 
 #if LWIP_NETCONN_SEM_PER_THREAD
@@ -223,6 +241,8 @@ void lwip_netconn_do_join_leave_group_netif(void *m);
 
 #if LWIP_DNS
 void lwip_netconn_do_gethostbyname(void *arg);
+err_t lwip_netconn_do_gethostbyname_nb(struct tcpip_api_call_data* call);
+err_t lwip_netconn_check_gethostbyname_nb(struct tcpip_api_call_data* call);															
 #endif /* LWIP_DNS */
 
 struct netconn* netconn_alloc(enum netconn_type t, netconn_callback callback);
