@@ -449,9 +449,11 @@ void netif_set_addr(struct netif *netif, const ip4_addr_t *ipaddr, const ip4_add
 struct netif *netif_add(struct netif *netif, void *state, netif_init_fn init, netif_input_fn input);
 #endif /* LWIP_IPV4 */
 
+/*
 #if ESP_GRATUITOUS_ARP
 void netif_set_garp_flag(struct netif *netif);
 #endif
+*/
 
 void netif_remove(struct netif * netif);
 bool netif_added(struct netif *netif);
