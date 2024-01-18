@@ -47,6 +47,8 @@
 
 #include "mbedtls/md5.h"
 #include "mbedtls/sha1.h"
+#include "mbedtls/sha256.h"
+#include "mbedtls/sha512.h"
 
 err_t
 snmpv3_auth(struct snmp_pbuf_stream *stream, u16_t length,
@@ -65,6 +67,12 @@ snmpv3_auth(struct snmp_pbuf_stream *stream, u16_t length,
   } else if (algo == SNMP_V3_AUTH_ALGO_SHA) {
     md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA1);
     key_len = SNMP_V3_SHA_LEN;
+  } else if (algo == SNMP_V3_AUTH_ALGO_SHA256) {
+    md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    key_len = SNMP_V3_SHA256_LEN;
+  } else if (algo == SNMP_V3_AUTH_ALGO_SHA512) {
+    md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA512);
+    key_len = SNMP_V3_SHA512_LEN;
   } else {
     return ERR_ARG;
   }
@@ -176,14 +184,25 @@ snmpv3_crypt(struct snmp_pbuf_stream *stream, u16_t length,
     if (snmp_pbuf_stream_writebuf(&write_stream, out_bytes, (u16_t)out_len) != ERR_OK) {
       goto error;
     }
-  } else if (algo == SNMP_V3_PRIV_ALGO_AES) {
-    u8_t iv_local[16];
-
-    cipher_info = mbedtls_cipher_info_from_type(MBEDTLS_CIPHER_AES_128_CFB128);
+  }  else if (algo == SNMP_V3_PRIV_ALGO_AES || algo == SNMP_V3_PRIV_ALGO_AES192 || algo == SNMP_V3_PRIV_ALGO_AES256){
+    u8_t iv_local[LWIP_MAX(16,8+SNMP_V3_MAX_PRIV_PARAM_LENGTH)];
+	u8_t key_length=16;
+	cipher_info = mbedtls_cipher_info_from_type(MBEDTLS_CIPHER_AES_128_CFB128);
+    if(algo == SNMP_V3_PRIV_ALGO_AES192)
+    {
+    	key_length=24;
+		cipher_info = mbedtls_cipher_info_from_type(MBEDTLS_CIPHER_AES_192_CFB128);
+    }
+    else if(algo == SNMP_V3_PRIV_ALGO_AES256)
+    {
+    	key_length=32;
+		cipher_info = mbedtls_cipher_info_from_type(MBEDTLS_CIPHER_AES_256_CFB128);
+    }
+	
     if (mbedtls_cipher_setup(&ctx, cipher_info) != 0) {
       return ERR_ARG;
     }
-    if (mbedtls_cipher_setkey(&ctx, key, 16 * 8, (mode == SNMP_V3_PRIV_MODE_ENCRYPT) ? MBEDTLS_ENCRYPT : MBEDTLS_DECRYPT) != 0) {
+    if (mbedtls_cipher_setkey(&ctx, key, key_length * 8, (mode == SNMP_V3_PRIV_MODE_ENCRYPT) ? MBEDTLS_ENCRYPT : MBEDTLS_DECRYPT) != 0) {
       goto error;
     }
 
@@ -199,26 +218,35 @@ snmpv3_crypt(struct snmp_pbuf_stream *stream, u16_t length,
     iv_local[4 + 1] = (engine_time  >> 16) & 0xFF;
     iv_local[4 + 2] = (engine_time  >>  8) & 0xFF;
     iv_local[4 + 3] = (engine_time  >>  0) & 0xFF;
-    SMEMCPY(iv_local + 8, priv_param, 8);
+    SMEMCPY(iv_local + 8, priv_param, SNMP_V3_MAX_PRIV_PARAM_LENGTH);
     if (mbedtls_cipher_set_iv(&ctx, iv_local, LWIP_ARRAYSIZE(iv_local)) != 0) {
       goto error;
     }
 
-    for (i = 0; i < length; i++) {
-      u8_t in_byte;
-      u8_t out_byte;
-      size_t out_len = sizeof(out_byte);
-
-      if (snmp_pbuf_stream_read(&read_stream, &in_byte) != ERR_OK) {
-        goto error;
-      }
-      if (mbedtls_cipher_update(&ctx, &in_byte, sizeof(in_byte), &out_byte, &out_len) != 0) {
-        goto error;
-      }
-      if (snmp_pbuf_stream_write(&write_stream, out_byte) != ERR_OK) {
-        goto error;
-      }
-    }
+    for (i = 0; i < length; i+=16) {
+		u8_t in_byte[16];
+		u8_t out_byte[16];
+		u8_t len=(length-i)<16 ? (length-i): 16;
+		
+		for (size_t j = 0; j < len; j++) {
+			if (snmp_pbuf_stream_read(&read_stream, &in_byte[j]) != ERR_OK) {
+				goto error;
+			}
+		}	
+		
+		if(len<16){
+			MEMSET(in_byte+len,0x0,16-len);
+		}
+		
+		size_t out_len = sizeof(out_byte);
+		
+		if (mbedtls_cipher_update(&ctx, in_byte, sizeof(in_byte), out_byte, &out_len) != 0) {
+			goto error;
+		}
+		if (snmp_pbuf_stream_writebuf(&write_stream, out_byte, len) != ERR_OK) {
+			goto error;
+		}
+	}
   } else {
     return ERR_ARG;
   }
@@ -243,10 +271,14 @@ snmpv3_password_to_key_md5(
   u8_t       *key)         /* OUT - pointer to caller 16-octet buffer */
 {
   mbedtls_md5_context MD;
-  u8_t *cp, password_buf[64];
+  u8_t *cp, *password_buf;
   u32_t password_index = 0;
   u8_t i;
   u32_t count = 0;
+  
+  password_buf = malloc(SNMP_V3_MAX_ENGINE_ID_LENGTH+SNMP_V3_MD5_LEN*2);
+  if(password_buf==NULL)
+	  return;
 
   mbedtls_md5_init(&MD); /* initialize MD5 */
   mbedtls_md5_starts(&MD);
@@ -265,6 +297,8 @@ snmpv3_password_to_key_md5(
     }
     mbedtls_md5_update(&MD, password_buf, 64);
     count += 64;
+    if((count&0xffff)==0x0)
+    	sys_delay_ms(1);
   }
   mbedtls_md5_finish(&MD, key); /* tell MD5 we're done */
 
@@ -274,15 +308,18 @@ snmpv3_password_to_key_md5(
   /* May want to ensure that engineLength <= 32,       */
   /* otherwise need to use a buffer larger than 64     */
   /*****************************************************/
-  SMEMCPY(password_buf, key, 16);
-  MEMCPY(password_buf + 16, engineID, engineLength);
-  SMEMCPY(password_buf + 16 + engineLength, key, 16);
+  SMEMCPY(password_buf, key, SNMP_V3_MD5_LEN);
+  MEMCPY(password_buf + SNMP_V3_MD5_LEN, engineID, engineLength);
+  SMEMCPY(password_buf + SNMP_V3_MD5_LEN + engineLength, key, SNMP_V3_MD5_LEN);
 
   mbedtls_md5_starts(&MD);
-  mbedtls_md5_update(&MD, password_buf, 32 + engineLength);
+  mbedtls_md5_update(&MD, password_buf, SNMP_V3_MD5_LEN*2 + engineLength);
   mbedtls_md5_finish(&MD, key);
 
   mbedtls_md5_free(&MD);
+
+  free(password_buf);
+  
   return;
 }
 
@@ -296,11 +333,15 @@ snmpv3_password_to_key_sha(
   u8_t       *key)         /* OUT - pointer to caller 20-octet buffer */
 {
   mbedtls_sha1_context SH;
-  u8_t *cp, password_buf[72];
+  u8_t *cp, *password_buf;;
   u32_t password_index = 0;
   u8_t i;
   u32_t count = 0;
 
+  password_buf = malloc(SNMP_V3_MAX_ENGINE_ID_LENGTH+SNMP_V3_SHA_LEN*2);
+  if(password_buf==NULL)
+	  return;
+  
   mbedtls_sha1_init(&SH); /* initialize SHA */
   mbedtls_sha1_starts(&SH);
 
@@ -318,6 +359,8 @@ snmpv3_password_to_key_sha(
     }
     mbedtls_sha1_update(&SH, password_buf, 64);
     count += 64;
+    if((count&0xffff)==0x0)
+    	sys_delay_ms(1);
   }
   mbedtls_sha1_finish(&SH, key); /* tell SHA we're done */
 
@@ -327,16 +370,150 @@ snmpv3_password_to_key_sha(
   /* May want to ensure that engineLength <= 32,       */
   /* otherwise need to use a buffer larger than 72     */
   /*****************************************************/
-  SMEMCPY(password_buf, key, 20);
-  MEMCPY(password_buf + 20, engineID, engineLength);
-  SMEMCPY(password_buf + 20 + engineLength, key, 20);
+  SMEMCPY(password_buf, key, SNMP_V3_SHA_LEN);
+  MEMCPY(password_buf + SNMP_V3_SHA_LEN, engineID, engineLength);
+  SMEMCPY(password_buf + SNMP_V3_SHA_LEN + engineLength, key, SNMP_V3_SHA_LEN);
 
   mbedtls_sha1_starts(&SH);
-  mbedtls_sha1_update(&SH, password_buf, 40 + engineLength);
+  mbedtls_sha1_update(&SH, password_buf, SNMP_V3_SHA_LEN*2 + engineLength);
   mbedtls_sha1_finish(&SH, key);
 
   mbedtls_sha1_free(&SH);
+  
+  free(password_buf);
+  
   return;
 }
+
+void
+snmpv3_password_to_key_sha256(
+  const u8_t *password,    /* IN */
+  size_t      passwordlen, /* IN */
+  const u8_t *engineID,    /* IN  - pointer to snmpEngineID  */
+  u8_t        engineLength,/* IN  - length of snmpEngineID */
+  u8_t       *key)         /* OUT - pointer to caller 32-octet buffer */
+{
+  mbedtls_sha256_context SH;
+  u8_t *cp, *password_buf;;
+  u32_t password_index = 0;
+  u8_t i;
+  u32_t count = 0;
+
+  password_buf = malloc(SNMP_V3_MAX_ENGINE_ID_LENGTH+SNMP_V3_SHA256_LEN*2);
+  if(password_buf==NULL)
+	  return;
+  
+  mbedtls_sha256_init(&SH); /* initialize SHA */
+  mbedtls_sha256_starts(&SH, 0);
+
+  /**********************************************/
+  /* Use while loop until we've done 1 Megabyte */
+  /**********************************************/
+  while (count < 1048576) {
+    cp = password_buf;
+    for (i = 0; i < 64; i++) {
+      /*************************************************/
+      /* Take the next octet of the password, wrapping */
+      /* to the beginning of the password as necessary.*/
+      /*************************************************/
+      *cp++ = password[password_index++ % passwordlen];
+    }
+    mbedtls_sha256_update(&SH, password_buf, 64);
+    count += 64;
+    if((count&0xffff)==0x0)
+    	sys_delay_ms(1);
+  }
+  mbedtls_sha256_finish(&SH, key); /* tell SHA we're done */
+
+  /*****************************************************/
+  /* Now localize the key with the engineID and pass   */
+  /* through SHA to produce final key                  */
+  /* May want to ensure that engineLength <= 32,       */
+  /* otherwise need to use a buffer larger than 72     */
+  /*****************************************************/
+  SMEMCPY(password_buf, key, SNMP_V3_SHA256_LEN);
+  MEMCPY(password_buf + SNMP_V3_SHA256_LEN, engineID, engineLength);
+  SMEMCPY(password_buf + SNMP_V3_SHA256_LEN + engineLength, key, SNMP_V3_SHA256_LEN);
+
+  mbedtls_sha256_starts(&SH,0);
+  mbedtls_sha256_update(&SH, password_buf, SNMP_V3_SHA256_LEN*2 + engineLength);
+  mbedtls_sha256_finish(&SH, key);
+
+  mbedtls_sha256_free(&SH);
+  
+  free(password_buf);
+  
+  return;
+}
+
+void
+snmpv3_password_to_key_sha512(
+  const u8_t *password,    /* IN */
+  size_t      passwordlen, /* IN */
+  const u8_t *engineID,    /* IN  - pointer to snmpEngineID  */
+  u8_t        engineLength,/* IN  - length of snmpEngineID */
+  u8_t       *key)         /* OUT - pointer to caller 64-octet buffer */
+{
+  mbedtls_sha512_context SH;
+  u8_t *cp, *password_buf;;
+  u32_t password_index = 0;
+  u8_t i;
+  u32_t count = 0;
+
+  password_buf = malloc(SNMP_V3_MAX_ENGINE_ID_LENGTH+SNMP_V3_SHA512_LEN*2);
+  if(password_buf==NULL)
+	  return;
+  
+  mbedtls_sha512_init(&SH); /* initialize SHA */
+  mbedtls_sha512_starts(&SH,0);
+
+  /**********************************************/
+  /* Use while loop until we've done 1 Megabyte */
+  /**********************************************/
+  while (count < 1048576) {
+    cp = password_buf;
+    for (i = 0; i < 128; i++) {
+      /*************************************************/
+      /* Take the next octet of the password, wrapping */
+      /* to the beginning of the password as necessary.*/
+      /*************************************************/
+      *cp++ = password[password_index++ % passwordlen];
+    }
+    mbedtls_sha512_update(&SH, password_buf, 128);
+    count += 128;
+    if((count&0xffff)==0x0)
+    	sys_delay_ms(1);
+  }
+  mbedtls_sha512_finish(&SH, key); /* tell SHA we're done */
+
+  /*****************************************************/
+  /* Now localize the key with the engineID and pass   */
+  /* through SHA to produce final key                  */
+  /* May want to ensure that engineLength <= 32,       */
+  /* otherwise need to use a buffer larger than 72     */
+  /*****************************************************/
+  SMEMCPY(password_buf, key, SNMP_V3_SHA512_LEN);
+  MEMCPY(password_buf + SNMP_V3_SHA512_LEN, engineID, engineLength);
+  SMEMCPY(password_buf + SNMP_V3_SHA512_LEN + engineLength, key, SNMP_V3_SHA512_LEN);
+
+  mbedtls_sha512_starts(&SH,0);
+  mbedtls_sha512_update(&SH, password_buf, SNMP_V3_SHA512_LEN*2 + engineLength);
+  mbedtls_sha512_finish(&SH, key);
+
+  mbedtls_sha512_free(&SH);
+  
+  free(password_buf);
+  
+  return;
+}
+
+
+
+
+
+
+
+
+
 
 #endif /* LWIP_SNMP && LWIP_SNMP_V3 && LWIP_SNMP_V3_MBEDTLS */
